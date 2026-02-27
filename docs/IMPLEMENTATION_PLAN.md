@@ -105,6 +105,7 @@ Prioritize compatibility in this order:
 
 - run against GJF on curated corpus
 - report mismatch summary and sampled diffs
+- emit machine-readable JSON reports for CI trend tracking
 - fail CI when mismatch rate exceeds threshold
 
 ### 7.3 Property/Safety Tests

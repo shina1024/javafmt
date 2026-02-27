@@ -1,5 +1,6 @@
 param(
     [string]$GjfJar = "",
+    [string]$ReportPath = "",
     [Parameter(Mandatory = $true)]
     [string[]]$Inputs
 )
@@ -21,4 +22,8 @@ if (-not (Test-Path $resolvedJar)) {
     throw "GJF jar not found: $resolvedJar"
 }
 
-cargo run -p gjf-reference -- --gjf-jar $resolvedJar $Inputs
+if ($ReportPath) {
+    cargo run -p gjf-reference -- --gjf-jar $resolvedJar --report $ReportPath $Inputs
+} else {
+    cargo run -p gjf-reference -- --gjf-jar $resolvedJar $Inputs
+}

@@ -1,9 +1,11 @@
 use clap::Parser;
 use javafmt::format_str;
+use serde::Serialize;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
+use std::time::Instant;
 
 #[derive(Debug, Parser)]
 #[command(name = "gjf-reference")]
@@ -11,8 +13,21 @@ use std::process::{Command, ExitCode, Stdio};
 struct Cli {
     #[arg(long, help = "Path to google-java-format jar file")]
     gjf_jar: Option<PathBuf>,
+    #[arg(
+        long,
+        help = "Write JSON report (checked files, mismatch count, mismatch files)"
+    )]
+    report: Option<PathBuf>,
     #[arg(required = true)]
     inputs: Vec<PathBuf>,
+}
+
+#[derive(Debug, Serialize)]
+struct ComparisonReport {
+    files_checked: usize,
+    mismatches: usize,
+    mismatch_files: Vec<String>,
+    elapsed_ms: u128,
 }
 
 fn main() -> ExitCode {
@@ -27,9 +42,10 @@ fn main() -> ExitCode {
 
 fn run() -> Result<ExitCode, String> {
     let cli = Cli::parse();
+    let started = Instant::now();
     let gjf_jar = resolve_gjf_jar(cli.gjf_jar)?;
     let files = collect_java_files(&cli.inputs)?;
-    let mut mismatch = false;
+    let mut mismatch_files = Vec::new();
 
     for file in &files {
         let source = fs::read_to_string(file)
@@ -38,16 +54,43 @@ fn run() -> Result<ExitCode, String> {
         let reference = format_with_gjf(&gjf_jar, &source)
             .map_err(|e| format!("failed to run GJF for {}: {e}", file.display()))?;
         if ours != reference {
-            mismatch = true;
             println!("mismatch: {}", file.display());
+            mismatch_files.push(file.display().to_string());
         }
     }
 
-    if mismatch {
+    let report = ComparisonReport {
+        files_checked: files.len(),
+        mismatches: mismatch_files.len(),
+        mismatch_files,
+        elapsed_ms: started.elapsed().as_millis(),
+    };
+
+    println!(
+        "checked={} mismatches={} elapsed_ms={}",
+        report.files_checked, report.mismatches, report.elapsed_ms
+    );
+
+    if let Some(report_path) = cli.report {
+        write_report(&report_path, &report)?;
+        println!("report: {}", report_path.display());
+    }
+
+    if report.mismatches > 0 {
         Ok(ExitCode::from(1))
     } else {
         Ok(ExitCode::SUCCESS)
     }
+}
+
+fn write_report(path: &Path, report: &ComparisonReport) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
+        }
+    }
+    let json = serde_json::to_string_pretty(report).map_err(|e| format!("json: {e}"))?;
+    fs::write(path, json).map_err(|e| format!("{}: {e}", path.display()))
 }
 
 fn resolve_gjf_jar(explicit: Option<PathBuf>) -> Result<PathBuf, String> {
