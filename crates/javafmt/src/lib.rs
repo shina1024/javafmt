@@ -126,6 +126,13 @@ mod tests {
     }
 
     #[test]
+    fn keeps_text_block_intact() {
+        let input = "class A{String f(){return \"\"\"\nline1\nline2\n\"\"\";}}\n";
+        let result = format_str(input);
+        assert!(result.output.contains("\"\"\"\nline1\nline2\n\"\"\""));
+    }
+
+    #[test]
     fn appends_trailing_newline() {
         let input = "class A {}";
         let result = format_str(input);
