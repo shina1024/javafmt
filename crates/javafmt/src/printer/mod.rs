@@ -6,6 +6,20 @@ pub struct PrintedDoc {
     pub text: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BlockKind {
+    Normal,
+    Switch,
+    TypeBody,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct BlockFrame {
+    multiline: bool,
+    kind: BlockKind,
+    in_switch_case: bool,
+}
+
 pub fn print(ir: &FormatIr<'_>) -> PrintedDoc {
     PrintedDoc {
         text: format_tokens(ir),
@@ -19,19 +33,28 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
     let mut indent = 0usize;
     let mut at_line_start = true;
     let mut paren_depth = 0usize;
-    let mut block_stack: Vec<bool> = Vec::new();
+    let mut block_stack: Vec<BlockFrame> = Vec::new();
     let mut prev_text: Option<String> = None;
     let mut prev_kind: Option<TokenKind> = None;
+    let mut annotation_active = false;
+    let mut annotation_paren_depth = 0usize;
+    let mut pending_switch_block = false;
+    let mut pending_type_block = false;
+    let mut pending_non_sealed = false;
+    let mut lambda_continuation_active = false;
+    let mut lambda_continuation_base_indent = 0usize;
+    let mut lambda_continuation_base_block_depth = 0usize;
 
     while i < tokens.len() {
         let token = tokens[i];
         match token.kind {
             TokenKind::LineComment => {
                 ensure_space(&mut out, at_line_start);
+                let current_indent = active_indent(indent, &block_stack);
                 write_with_indent(
                     &mut out,
                     &mut at_line_start,
-                    indent,
+                    current_indent,
                     token_text(ir.source, token),
                 );
                 out.push('\n');
@@ -43,7 +66,8 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
             TokenKind::BlockComment => {
                 ensure_space(&mut out, at_line_start);
                 let text = token_text(ir.source, token);
-                write_with_indent(&mut out, &mut at_line_start, indent, text);
+                let current_indent = active_indent(indent, &block_stack);
+                write_with_indent(&mut out, &mut at_line_start, current_indent, text);
                 if text.ends_with('\n') {
                     at_line_start = true;
                 }
@@ -51,19 +75,131 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                 prev_kind = Some(TokenKind::BlockComment);
                 i += 1;
             }
+            TokenKind::Word => {
+                let word = token_text(ir.source, token);
+                let suppress_space_for_non_sealed = pending_non_sealed && word == "sealed";
+                pending_non_sealed = false;
+                if is_switch_label(word, &block_stack) {
+                    if let Some(frame) = block_stack.last_mut() {
+                        frame.in_switch_case = false;
+                    }
+                    if !at_line_start {
+                        out.push('\n');
+                        at_line_start = true;
+                    }
+                    let current_indent = active_indent(indent, &block_stack);
+                    write_with_indent(&mut out, &mut at_line_start, current_indent, word);
+                    i += 1;
+
+                    while i < tokens.len() {
+                        let label_token = tokens[i];
+                        if label_token.kind == TokenKind::Symbol {
+                            let (symbol, consumed) = read_symbol(tokens.as_slice(), i, ir.source);
+                            if symbol == ":" {
+                                write_with_indent(
+                                    &mut out,
+                                    &mut at_line_start,
+                                    current_indent,
+                                    ":",
+                                );
+                                out.push('\n');
+                                at_line_start = true;
+                                if let Some(frame) = block_stack.last_mut() {
+                                    frame.in_switch_case = true;
+                                }
+                                prev_text = Some(String::from(":"));
+                                prev_kind = Some(TokenKind::Symbol);
+                                i += consumed;
+                                break;
+                            }
+
+                            ensure_space(&mut out, at_line_start);
+                            write_with_indent(
+                                &mut out,
+                                &mut at_line_start,
+                                current_indent,
+                                &symbol,
+                            );
+                            i += consumed;
+                            continue;
+                        }
+
+                        ensure_space(&mut out, at_line_start);
+                        write_with_indent(
+                            &mut out,
+                            &mut at_line_start,
+                            current_indent,
+                            token_text(ir.source, label_token),
+                        );
+                        i += 1;
+                    }
+
+                    continue;
+                }
+
+                if !suppress_space_for_non_sealed
+                    && needs_space_before(&prev_text, word, at_line_start)
+                {
+                    ensure_space(&mut out, at_line_start);
+                }
+                let current_indent = active_indent(indent, &block_stack);
+                write_with_indent(&mut out, &mut at_line_start, current_indent, word);
+                prev_text = Some(word.to_owned());
+                prev_kind = Some(TokenKind::Word);
+                if word == "switch" {
+                    pending_switch_block = true;
+                }
+                if is_type_declaration_keyword(word) {
+                    pending_type_block = true;
+                }
+                i += 1;
+
+                if annotation_active && annotation_paren_depth == 0 {
+                    let next = next_symbol_text(tokens.as_slice(), i, ir.source);
+                    if next.as_deref() != Some(".") && next.as_deref() != Some("(") {
+                        out.push('\n');
+                        at_line_start = true;
+                        annotation_active = false;
+                    }
+                }
+            }
             TokenKind::Symbol => {
                 let (symbol, consumed) = read_symbol(tokens.as_slice(), i, ir.source);
                 let next_text = next_symbol_text(tokens.as_slice(), i + consumed, ir.source);
 
                 match symbol.as_str() {
+                    "@" => {
+                        if !at_line_start {
+                            out.push('\n');
+                            at_line_start = true;
+                        }
+                        let current_indent = active_indent(indent, &block_stack);
+                        write_with_indent(&mut out, &mut at_line_start, current_indent, "@");
+                        annotation_active = true;
+                        annotation_paren_depth = 0;
+                    }
                     "{" => {
                         if needs_space_before(&prev_text, "{", at_line_start) {
                             ensure_space(&mut out, at_line_start);
                         }
-                        write_with_indent(&mut out, &mut at_line_start, indent, "{");
+                        let current_indent = active_indent(indent, &block_stack);
+                        write_with_indent(&mut out, &mut at_line_start, current_indent, "{");
 
                         let is_empty = next_text.as_deref() == Some("}");
-                        block_stack.push(!is_empty);
+                        let kind = if pending_switch_block {
+                            BlockKind::Switch
+                        } else if pending_type_block {
+                            BlockKind::TypeBody
+                        } else {
+                            BlockKind::Normal
+                        };
+                        pending_switch_block = false;
+                        pending_type_block = false;
+                        block_stack.push(BlockFrame {
+                            multiline: !is_empty,
+                            kind,
+                            in_switch_case: false,
+                        });
                         if !is_empty {
                             out.push('\n');
                             at_line_start = true;
@@ -71,8 +207,12 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                         }
                     }
                     "}" => {
-                        let multiline = block_stack.pop().unwrap_or(true);
-                        if multiline {
+                        let frame = block_stack.pop().unwrap_or(BlockFrame {
+                            multiline: true,
+                            kind: BlockKind::Normal,
+                            in_switch_case: false,
+                        });
+                        if frame.multiline {
                             indent = indent.saturating_sub(1);
                             if !at_line_start {
                                 out.push('\n');
@@ -80,65 +220,162 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                             }
                         }
 
-                        write_with_indent(&mut out, &mut at_line_start, indent, "}");
+                        let current_indent = active_indent(indent, &block_stack);
+                        write_with_indent(&mut out, &mut at_line_start, current_indent, "}");
 
+                        let parent_is_type_body = block_stack
+                            .last()
+                            .is_some_and(|parent| parent.kind == BlockKind::TypeBody);
                         if next_text.as_deref() == Some(";") {
                             // keep same line for "};"
-                        } else if next_text.as_deref() == Some("else") {
+                        } else if matches!(next_text.as_deref(), Some("else" | "catch" | "finally"))
+                        {
                             out.push(' ');
                         } else if next_text.is_some() {
                             out.push('\n');
                             at_line_start = true;
+                            if parent_is_type_body && next_text.as_deref() != Some("}") {
+                                out.push('\n');
+                            }
+                        }
+                        if lambda_continuation_active
+                            && block_stack.len() < lambda_continuation_base_block_depth
+                        {
+                            indent = lambda_continuation_base_indent;
+                            lambda_continuation_active = false;
                         }
                     }
                     ";" => {
-                        write_with_indent(&mut out, &mut at_line_start, indent, ";");
+                        let current_indent = active_indent(indent, &block_stack);
+                        write_with_indent(&mut out, &mut at_line_start, current_indent, ";");
+                        pending_switch_block = false;
+                        pending_type_block = false;
+                        if lambda_continuation_active
+                            && block_stack.len() == lambda_continuation_base_block_depth
+                        {
+                            indent = lambda_continuation_base_indent;
+                            lambda_continuation_active = false;
+                        }
                         if paren_depth == 0 {
                             out.push('\n');
                             at_line_start = true;
+                            let in_type_body = block_stack
+                                .last()
+                                .is_some_and(|frame| frame.kind == BlockKind::TypeBody);
+                            if in_type_body
+                                && next_text.as_deref() != Some("}")
+                                && next_member_looks_like_method(
+                                    tokens.as_slice(),
+                                    i + consumed,
+                                    ir.source,
+                                )
+                            {
+                                out.push('\n');
+                            }
                         } else {
                             out.push(' ');
                         }
                     }
                     "," => {
-                        write_with_indent(&mut out, &mut at_line_start, indent, ",");
+                        let current_indent = active_indent(indent, &block_stack);
+                        write_with_indent(&mut out, &mut at_line_start, current_indent, ",");
                         out.push(' ');
                     }
                     "(" => {
                         if needs_space_before_open_paren(&prev_text) {
                             ensure_space(&mut out, at_line_start);
                         }
-                        write_with_indent(&mut out, &mut at_line_start, indent, "(");
+                        let current_indent = active_indent(indent, &block_stack);
+                        write_with_indent(&mut out, &mut at_line_start, current_indent, "(");
                         paren_depth += 1;
+                        if annotation_active {
+                            annotation_paren_depth += 1;
+                        }
                     }
                     ")" => {
-                        write_with_indent(&mut out, &mut at_line_start, indent, ")");
+                        let current_indent = active_indent(indent, &block_stack);
+                        write_with_indent(&mut out, &mut at_line_start, current_indent, ")");
                         paren_depth = paren_depth.saturating_sub(1);
-                    }
-                    "[" | "]" | "." | "@" | "::" => {
-                        if symbol == "@" && !at_line_start {
-                            out.push('\n');
-                            at_line_start = true;
+                        if annotation_active && annotation_paren_depth > 0 {
+                            annotation_paren_depth -= 1;
                         }
-                        write_with_indent(&mut out, &mut at_line_start, indent, &symbol);
+                    }
+                    "." | "[" | "]" | "::" => {
+                        let current_indent = active_indent(indent, &block_stack);
+                        write_with_indent(&mut out, &mut at_line_start, current_indent, &symbol);
                     }
                     "++" | "--" => {
-                        write_with_indent(&mut out, &mut at_line_start, indent, &symbol);
+                        let current_indent = active_indent(indent, &block_stack);
+                        write_with_indent(&mut out, &mut at_line_start, current_indent, &symbol);
                     }
-                    "?" | ":" | "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^="
-                    | "==" | "!=" | "<=" | ">=" | "&&" | "||" | "+" | "-" | "*" | "/" | "%"
-                    | "&" | "|" | "^" | "->" => {
+                    "=" => {
                         ensure_space(&mut out, at_line_start);
-                        write_with_indent(&mut out, &mut at_line_start, indent, &symbol);
+                        let current_indent = active_indent(indent, &block_stack);
+                        write_with_indent(&mut out, &mut at_line_start, current_indent, "=");
+                        if starts_block_lambda_rhs(tokens.as_slice(), i + consumed, ir.source) {
+                            out.push('\n');
+                            at_line_start = true;
+                            if !lambda_continuation_active {
+                                lambda_continuation_active = true;
+                                lambda_continuation_base_indent = indent;
+                                lambda_continuation_base_block_depth = block_stack.len();
+                                indent += 2;
+                            }
+                        } else {
+                            out.push(' ');
+                        }
+                    }
+                    "-" => {
+                        if prev_text.as_deref() == Some("non")
+                            && next_text.as_deref() == Some("sealed")
+                        {
+                            let current_indent = active_indent(indent, &block_stack);
+                            write_with_indent(&mut out, &mut at_line_start, current_indent, "-");
+                            pending_non_sealed = true;
+                        } else {
+                            ensure_space(&mut out, at_line_start);
+                            let current_indent = active_indent(indent, &block_stack);
+                            write_with_indent(
+                                &mut out,
+                                &mut at_line_start,
+                                current_indent,
+                                &symbol,
+                            );
+                            out.push(' ');
+                        }
+                    }
+                    "?" | ":" | "+=" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^=" | "=="
+                    | "!=" | "<=" | ">=" | "&&" | "||" | "+" | "*" | "/" | "%" | "&" | "|"
+                    | "^" | "->" => {
+                        ensure_space(&mut out, at_line_start);
+                        let current_indent = active_indent(indent, &block_stack);
+                        write_with_indent(&mut out, &mut at_line_start, current_indent, &symbol);
                         out.push(' ');
                     }
                     "<" | ">" | "<<" | ">>" | ">>>" | "<<=" | ">>=" | ">>>=" => {
-                        if is_generic_angle(&prev_kind, prev_text.as_deref(), next_text.as_deref())
-                        {
-                            write_with_indent(&mut out, &mut at_line_start, indent, &symbol);
+                        let generic_like = paren_depth == 0
+                            && is_generic_angle(
+                                &prev_kind,
+                                prev_text.as_deref(),
+                                next_text.as_deref(),
+                            );
+                        if generic_like {
+                            let current_indent = active_indent(indent, &block_stack);
+                            write_with_indent(
+                                &mut out,
+                                &mut at_line_start,
+                                current_indent,
+                                &symbol,
+                            );
                         } else {
                             ensure_space(&mut out, at_line_start);
-                            write_with_indent(&mut out, &mut at_line_start, indent, &symbol);
+                            let current_indent = active_indent(indent, &block_stack);
+                            write_with_indent(
+                                &mut out,
+                                &mut at_line_start,
+                                current_indent,
+                                &symbol,
+                            );
                             out.push(' ');
                         }
                     }
@@ -146,22 +383,38 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                         if needs_space_before(&prev_text, &symbol, at_line_start) {
                             ensure_space(&mut out, at_line_start);
                         }
-                        write_with_indent(&mut out, &mut at_line_start, indent, &symbol);
+                        let current_indent = active_indent(indent, &block_stack);
+                        write_with_indent(&mut out, &mut at_line_start, current_indent, &symbol);
                     }
                 }
 
-                prev_text = Some(symbol);
+                prev_text = Some(symbol.clone());
                 prev_kind = Some(TokenKind::Symbol);
                 i += consumed;
+
+                if annotation_active && annotation_paren_depth == 0 {
+                    if symbol != "@" && symbol != "." {
+                        let next = next_symbol_text(tokens.as_slice(), i, ir.source);
+                        if next.as_deref() != Some(".") && next.as_deref() != Some("(") {
+                            out.push('\n');
+                            at_line_start = true;
+                            annotation_active = false;
+                        }
+                    }
+                }
             }
-            _ => {
+            TokenKind::StringLiteral | TokenKind::CharLiteral => {
                 let text = token_text(ir.source, token);
                 if needs_space_before(&prev_text, text, at_line_start) {
                     ensure_space(&mut out, at_line_start);
                 }
-                write_with_indent(&mut out, &mut at_line_start, indent, text);
+                let current_indent = active_indent(indent, &block_stack);
+                write_with_indent(&mut out, &mut at_line_start, current_indent, text);
                 prev_text = Some(text.to_owned());
                 prev_kind = Some(token.kind);
+                i += 1;
+            }
+            TokenKind::Whitespace | TokenKind::Newline => {
                 i += 1;
             }
         }
@@ -174,11 +427,88 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
     normalized
 }
 
+fn active_indent(base_indent: usize, stack: &[BlockFrame]) -> usize {
+    match stack.last() {
+        Some(frame) if frame.kind == BlockKind::Switch && frame.in_switch_case => base_indent + 1,
+        _ => base_indent,
+    }
+}
+
+fn is_switch_label(word: &str, stack: &[BlockFrame]) -> bool {
+    matches!(word, "case" | "default")
+        && stack
+            .last()
+            .is_some_and(|frame| frame.kind == BlockKind::Switch)
+}
+
+fn is_type_declaration_keyword(word: &str) -> bool {
+    matches!(word, "class" | "interface" | "enum" | "record")
+}
+
 fn collect_meaningful_tokens<'a>(ir: &'a FormatIr<'a>) -> Vec<&'a Token> {
     ir.tokens
         .iter()
         .filter(|token| !matches!(token.kind, TokenKind::Whitespace | TokenKind::Newline))
         .collect::<Vec<_>>()
+}
+
+fn starts_block_lambda_rhs(tokens: &[&Token], mut index: usize, source: &str) -> bool {
+    let mut local_paren_depth = 0usize;
+    while index < tokens.len() {
+        let token = tokens[index];
+        if token.kind == TokenKind::Symbol {
+            let (symbol, consumed) = read_symbol(tokens, index, source);
+            match symbol.as_str() {
+                ";" if local_paren_depth == 0 => return false,
+                "(" => {
+                    local_paren_depth += 1;
+                }
+                ")" => {
+                    local_paren_depth = local_paren_depth.saturating_sub(1);
+                }
+                "->" if local_paren_depth == 0 => {
+                    return next_symbol_text(tokens, index + consumed, source).as_deref()
+                        == Some("{");
+                }
+                _ => {}
+            }
+            index += consumed;
+        } else {
+            index += 1;
+        }
+    }
+    false
+}
+
+fn next_member_looks_like_method(tokens: &[&Token], mut index: usize, source: &str) -> bool {
+    let mut local_paren_depth = 0usize;
+    let mut saw_signature_paren = false;
+
+    while index < tokens.len() {
+        let token = tokens[index];
+        if token.kind == TokenKind::Symbol {
+            let (symbol, consumed) = read_symbol(tokens, index, source);
+            match symbol.as_str() {
+                "(" => {
+                    local_paren_depth += 1;
+                    if local_paren_depth == 1 {
+                        saw_signature_paren = true;
+                    }
+                }
+                ")" => {
+                    local_paren_depth = local_paren_depth.saturating_sub(1);
+                }
+                "=" if local_paren_depth == 0 => return false,
+                "{" | ";" | "}" if local_paren_depth == 0 => return saw_signature_paren,
+                _ => {}
+            }
+            index += consumed;
+        } else {
+            index += 1;
+        }
+    }
+
+    false
 }
 
 fn next_symbol_text(tokens: &[&Token], mut index: usize, source: &str) -> Option<String> {
@@ -297,7 +627,7 @@ fn is_generic_angle(
         return true;
     }
     if matches!(prev_text, Some("<" | "," | "?"))
-        && matches!(next_text, Some(text) if is_word_like_text(text) || matches!(text, "?" | ">" | "," | "["))
+        && matches!(next_text, Some(text) if is_word_like_text(text) || matches!(text, "?" | ">" | "," | "[" | "]"))
     {
         return true;
     }
@@ -410,7 +740,7 @@ mod tests {
         let printed = print(&ir);
         assert_eq!(
             printed.text,
-            "class A {\n  @Override public String toString() {\n    //x\n    return \"x\";\n  }\n}\n"
+            "class A {\n  @Override\n  public String toString() {\n    //x\n    return \"x\";\n  }\n}\n"
         );
     }
 
@@ -423,5 +753,75 @@ mod tests {
         let ir = ir::build(&cst, attachments);
         let printed = print(&ir);
         assert_eq!(printed.text, "class A {\n  java.util.List<String> xs;\n}\n");
+    }
+
+    #[test]
+    fn keeps_operator_spacing_inside_parentheses() {
+        let source = "class A{int f(int n){for(int i=0;i<n;i++){if(i%2==0){continue;}else{break;}}return n;}}";
+        let lexed = lexer::lex(source);
+        let cst = parser::parse(&lexed);
+        let attachments = comments::attach(&cst, &lexed);
+        let ir = ir::build(&cst, attachments);
+        let printed = print(&ir);
+        assert!(printed.text.contains("i < n"));
+        assert!(printed.text.contains("i % 2 == 0"));
+    }
+
+    #[test]
+    fn joins_catch_and_finally() {
+        let source = "class A{void f(){try{foo();}catch(Exception e){bar();}finally{baz();}}void foo(){}void bar(){}void baz(){}}";
+        let lexed = lexer::lex(source);
+        let cst = parser::parse(&lexed);
+        let attachments = comments::attach(&cst, &lexed);
+        let ir = ir::build(&cst, attachments);
+        let printed = print(&ir);
+        assert!(printed.text.contains("} catch (Exception e) {"));
+        assert!(printed.text.contains("} finally {"));
+    }
+
+    #[test]
+    fn formats_switch_case_labels() {
+        let source = "class A{void f(){switch(x){case 1:foo();break;default:bar();}}int x;void foo(){}void bar(){}}";
+        let lexed = lexer::lex(source);
+        let cst = parser::parse(&lexed);
+        let attachments = comments::attach(&cst, &lexed);
+        let ir = ir::build(&cst, attachments);
+        let printed = print(&ir);
+        assert!(printed.text.contains("case 1:\n"));
+        assert!(printed.text.contains("default:\n"));
+    }
+
+    #[test]
+    fn keeps_non_sealed_keyword() {
+        let source = "class A{non-sealed class B{}}";
+        let lexed = lexer::lex(source);
+        let cst = parser::parse(&lexed);
+        let attachments = comments::attach(&cst, &lexed);
+        let ir = ir::build(&cst, attachments);
+        let printed = print(&ir);
+        assert!(printed.text.contains("non-sealed class B"));
+    }
+
+    #[test]
+    fn adds_blank_line_between_block_members_in_type_body() {
+        let source = "class A{void f(){}void g(){}}";
+        let lexed = lexer::lex(source);
+        let cst = parser::parse(&lexed);
+        let attachments = comments::attach(&cst, &lexed);
+        let ir = ir::build(&cst, attachments);
+        let printed = print(&ir);
+        assert!(printed.text.contains("void f() {}\n\n  void g() {}"));
+    }
+
+    #[test]
+    fn breaks_block_lambda_after_assignment() {
+        let source = "class A{void f(){Runnable r=()->{x();};}}";
+        let lexed = lexer::lex(source);
+        let cst = parser::parse(&lexed);
+        let attachments = comments::attach(&cst, &lexed);
+        let ir = ir::build(&cst, attachments);
+        let printed = print(&ir);
+        assert!(printed.text.contains("Runnable r =\n"));
+        assert!(printed.text.contains("() -> {\n"));
     }
 }

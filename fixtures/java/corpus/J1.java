@@ -1,0 +1,7 @@
+class J {
+  sealed interface S permits A, B {}
+
+  final class A implements S {}
+
+  non-sealed class B implements S {}
+}
