@@ -15,3 +15,26 @@ jobs:
         run: cargo build --workspace --locked
       - name: Test
         run: cargo test --workspace --locked
+
+  reference:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Download pinned google-java-format
+        run: |
+          VERSION="$(tr -d ' \n\r' < tools/gjf/version.txt)"
+          if [ -z "$VERSION" ] || [ "$VERSION" = "latest" ]; then
+            echo "tools/gjf/version.txt must contain a resolved version"
+            exit 1
+          fi
+          mkdir -p tools/gjf
+          curl -fsSL -o "tools/gjf/google-java-format-${VERSION}-all-deps.jar" \
+            "https://github.com/google/google-java-format/releases/download/v${VERSION}/google-java-format-${VERSION}-all-deps.jar"
+      - name: Reference diff
+        run: cargo run -p gjf-reference -- fixtures/java

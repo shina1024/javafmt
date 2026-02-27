@@ -1,5 +1,6 @@
 use clap::{ArgGroup, Parser};
 use javafmt::format_str;
+use rayon::prelude::*;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -22,6 +23,14 @@ struct Cli {
     files: Vec<PathBuf>,
 }
 
+#[derive(Debug)]
+struct FileOutcome {
+    index: usize,
+    path: PathBuf,
+    changed: bool,
+    output: String,
+}
+
 fn main() -> ExitCode {
     match run() {
         Ok(code) => code,
@@ -39,21 +48,33 @@ fn run() -> Result<ExitCode, io::Error> {
 
 fn run_with_mode(write: bool, inputs: &[PathBuf]) -> Result<ExitCode, io::Error> {
     let files = collect_java_files(inputs)?;
-    let mut has_diff = false;
+    let mut outcomes = files
+        .par_iter()
+        .enumerate()
+        .map(|(index, file)| {
+            let source = fs::read_to_string(file)?;
+            let result = format_str(&source);
+            Ok::<FileOutcome, io::Error>(FileOutcome {
+                index,
+                path: file.clone(),
+                changed: result.changed,
+                output: result.output,
+            })
+        })
+        .collect::<Result<Vec<_>, io::Error>>()?;
+    outcomes.sort_by_key(|entry| entry.index);
 
-    for file in &files {
-        let source = fs::read_to_string(file)?;
-        let result = format_str(&source);
-        if !result.changed {
+    let mut has_diff = false;
+    for outcome in outcomes {
+        if !outcome.changed {
             continue;
         }
-
         has_diff = true;
         if write {
-            fs::write(file, result.output)?;
-            println!("formatted {}", file.display());
+            fs::write(&outcome.path, outcome.output)?;
+            println!("formatted {}", outcome.path.display());
         } else {
-            println!("{}", file.display());
+            println!("{}", outcome.path.display());
         }
     }
 

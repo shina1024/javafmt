@@ -83,6 +83,7 @@ Latest-follow policy for GJF:
 - treat latest stable GJF as target behavior
 - update pinned reference version on a regular cadence (or immediately when needed)
 - record the exact pinned version in CI to keep test results reproducible
+- current pinned reference version: `1.34.1` (`tools/gjf/version.txt`)
 
 Prioritize compatibility in this order:
 
