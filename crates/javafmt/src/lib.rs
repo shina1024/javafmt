@@ -71,4 +71,12 @@ mod tests {
         assert_eq!(result.output, "class A {}\n");
         assert!(result.changed);
     }
+
+    #[test]
+    fn trims_trailing_whitespace() {
+        let input = "class A {}   \n";
+        let result = format_str(input);
+        assert_eq!(result.output, "class A {}\n");
+        assert!(result.changed);
+    }
 }
