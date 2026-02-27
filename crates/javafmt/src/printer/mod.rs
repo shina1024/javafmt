@@ -41,8 +41,8 @@ fn is_supported_subset(ir: &FormatIr<'_>) -> bool {
                         | "-"
                         | "*"
                         | "/"
-                        | "<"
-                        | ">"
+                        | "?"
+                        | ":"
                         | "["
                         | "]"
                 ) {
@@ -126,7 +126,7 @@ fn format_supported_subset(ir: &FormatIr<'_>) -> String {
             ")" | "." | "[" | "]" => {
                 write_with_indent(&mut out, &mut at_line_start, indent, text);
             }
-            "=" | "+" | "-" | "*" | "/" | "<" | ">" => {
+            "=" | "+" | "-" | "*" | "/" | "?" | ":" => {
                 ensure_space(&mut out, at_line_start);
                 write_with_indent(&mut out, &mut at_line_start, indent, text);
                 out.push(' ');
@@ -290,5 +290,30 @@ mod tests {
             printed.text,
             "class A {\n  String s = \"x\";\n  char c = 'y';\n}\n"
         );
+    }
+
+    #[test]
+    fn formats_ternary_expression() {
+        let source = "class A{int x(){return true?1:2;}}";
+        let lexed = lexer::lex(source);
+        let cst = parser::parse(&lexed);
+        let attachments = comments::attach(&cst, &lexed);
+        let ir = ir::build(&cst, attachments);
+        let printed = print(&ir);
+        assert_eq!(
+            printed.text,
+            "class A {\n  int x() {\n    return true ? 1 : 2;\n  }\n}\n"
+        );
+    }
+
+    #[test]
+    fn falls_back_for_angle_brackets() {
+        let source = "class A{java.util.List<String> xs;}";
+        let lexed = lexer::lex(source);
+        let cst = parser::parse(&lexed);
+        let attachments = comments::attach(&cst, &lexed);
+        let ir = ir::build(&cst, attachments);
+        let printed = print(&ir);
+        assert_eq!(printed.text, source);
     }
 }
