@@ -122,6 +122,7 @@ Prioritize compatibility in this order:
 - cold and warm runs
 - files/sec and MB/sec metrics
 - memory peak tracking
+- repeatable reference timing collection (`scripts/bench-reference.ps1`)
 
 ## 8. CLI Plan (gofmt-like UX)
 
