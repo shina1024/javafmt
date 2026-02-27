@@ -7,143 +7,171 @@ pub struct PrintedDoc {
 }
 
 pub fn print(ir: &FormatIr<'_>) -> PrintedDoc {
-    if !is_supported_subset(ir) {
-        return PrintedDoc {
-            text: ir.source.to_owned(),
-        };
-    }
-
     PrintedDoc {
-        text: format_supported_subset(ir),
+        text: format_tokens(ir),
     }
 }
 
-fn is_supported_subset(ir: &FormatIr<'_>) -> bool {
-    if ir.line_comment_count > 0 || ir.block_comment_count > 0 {
-        return false;
-    }
-
-    for token in &ir.tokens {
-        match token.kind {
-            TokenKind::LineComment | TokenKind::BlockComment => return false,
-            TokenKind::Symbol => {
-                let symbol = token_text(ir.source, token);
-                if !matches!(
-                    symbol,
-                    "{" | "}"
-                        | "("
-                        | ")"
-                        | ";"
-                        | ","
-                        | "."
-                        | "="
-                        | "+"
-                        | "-"
-                        | "*"
-                        | "/"
-                        | "?"
-                        | ":"
-                        | "["
-                        | "]"
-                ) {
-                    return false;
-                }
-            }
-            _ => {}
-        }
-    }
-    true
-}
-
-fn format_supported_subset(ir: &FormatIr<'_>) -> String {
-    let mut out = String::with_capacity(ir.source.len());
+fn format_tokens(ir: &FormatIr<'_>) -> String {
+    let tokens = collect_meaningful_tokens(ir);
+    let mut out = String::with_capacity(ir.source.len() + 16);
+    let mut i = 0usize;
     let mut indent = 0usize;
     let mut at_line_start = true;
-    let mut prev: Option<&Token> = None;
+    let mut paren_depth = 0usize;
     let mut block_stack: Vec<bool> = Vec::new();
-    let mut index = 0usize;
-    let meaningful = collect_meaningful_tokens(ir);
+    let mut prev_text: Option<String> = None;
+    let mut prev_kind: Option<TokenKind> = None;
 
-    while index < meaningful.len() {
-        let token = meaningful[index];
-        let text = token_text(ir.source, token);
-        let next = meaningful.get(index + 1).copied();
-
-        match text {
-            "{" => {
-                write_space_before_symbol(&mut out, prev, token, ir.source);
-                write_with_indent(&mut out, &mut at_line_start, indent, "{");
-                let is_empty_block = next.is_some_and(|tok| token_text(ir.source, tok) == "}");
-                block_stack.push(!is_empty_block);
-                if is_empty_block {
-                    // Keep "{}" on the same line to match GJF behavior for simple empty blocks.
-                } else {
-                    out.push('\n');
-                    at_line_start = true;
-                    indent += 1;
-                }
-            }
-            "}" => {
-                let multiline = block_stack.pop().unwrap_or(false);
-                if multiline {
-                    indent = indent.saturating_sub(1);
-                    if !at_line_start {
-                        out.push('\n');
-                        at_line_start = true;
-                    }
-                    write_with_indent(&mut out, &mut at_line_start, indent, "}");
-                    if next.is_some_and(|tok| token_text(ir.source, tok) == ";") {
-                        // Keep on same line for "};"
-                    } else {
-                        out.push('\n');
-                        at_line_start = true;
-                    }
-                } else {
-                    write_with_indent(&mut out, &mut at_line_start, indent, "}");
-                    if next.is_some_and(|tok| token_text(ir.source, tok) == ";") {
-                        // Keep on same line for "};"
-                    } else if next.is_some() {
-                        out.push('\n');
-                        at_line_start = true;
-                    }
-                }
-            }
-            ";" => {
-                write_with_indent(&mut out, &mut at_line_start, indent, ";");
+    while i < tokens.len() {
+        let token = tokens[i];
+        match token.kind {
+            TokenKind::LineComment => {
+                ensure_space(&mut out, at_line_start);
+                write_with_indent(
+                    &mut out,
+                    &mut at_line_start,
+                    indent,
+                    token_text(ir.source, token),
+                );
                 out.push('\n');
                 at_line_start = true;
+                prev_text = Some(String::from("//"));
+                prev_kind = Some(TokenKind::LineComment);
+                i += 1;
             }
-            "," => {
-                write_with_indent(&mut out, &mut at_line_start, indent, ",");
-                out.push(' ');
-            }
-            "(" => {
-                if should_space_before_open_paren(prev, ir.source) {
-                    ensure_space(&mut out, at_line_start);
-                }
-                write_with_indent(&mut out, &mut at_line_start, indent, "(");
-            }
-            ")" | "." | "[" | "]" => {
-                write_with_indent(&mut out, &mut at_line_start, indent, text);
-            }
-            "=" | "+" | "-" | "*" | "/" | "?" | ":" => {
+            TokenKind::BlockComment => {
                 ensure_space(&mut out, at_line_start);
+                let text = token_text(ir.source, token);
                 write_with_indent(&mut out, &mut at_line_start, indent, text);
-                out.push(' ');
+                if text.ends_with('\n') {
+                    at_line_start = true;
+                }
+                prev_text = Some(String::from("/*"));
+                prev_kind = Some(TokenKind::BlockComment);
+                i += 1;
+            }
+            TokenKind::Symbol => {
+                let (symbol, consumed) = read_symbol(tokens.as_slice(), i, ir.source);
+                let next_text = next_symbol_text(tokens.as_slice(), i + consumed, ir.source);
+
+                match symbol.as_str() {
+                    "{" => {
+                        if needs_space_before(&prev_text, "{", at_line_start) {
+                            ensure_space(&mut out, at_line_start);
+                        }
+                        write_with_indent(&mut out, &mut at_line_start, indent, "{");
+
+                        let is_empty = next_text.as_deref() == Some("}");
+                        block_stack.push(!is_empty);
+                        if !is_empty {
+                            out.push('\n');
+                            at_line_start = true;
+                            indent += 1;
+                        }
+                    }
+                    "}" => {
+                        let multiline = block_stack.pop().unwrap_or(true);
+                        if multiline {
+                            indent = indent.saturating_sub(1);
+                            if !at_line_start {
+                                out.push('\n');
+                                at_line_start = true;
+                            }
+                        }
+
+                        write_with_indent(&mut out, &mut at_line_start, indent, "}");
+
+                        if next_text.as_deref() == Some(";") {
+                            // keep same line for "};"
+                        } else if next_text.as_deref() == Some("else") {
+                            out.push(' ');
+                        } else if next_text.is_some() {
+                            out.push('\n');
+                            at_line_start = true;
+                        }
+                    }
+                    ";" => {
+                        write_with_indent(&mut out, &mut at_line_start, indent, ";");
+                        if paren_depth == 0 {
+                            out.push('\n');
+                            at_line_start = true;
+                        } else {
+                            out.push(' ');
+                        }
+                    }
+                    "," => {
+                        write_with_indent(&mut out, &mut at_line_start, indent, ",");
+                        out.push(' ');
+                    }
+                    "(" => {
+                        if needs_space_before_open_paren(&prev_text) {
+                            ensure_space(&mut out, at_line_start);
+                        }
+                        write_with_indent(&mut out, &mut at_line_start, indent, "(");
+                        paren_depth += 1;
+                    }
+                    ")" => {
+                        write_with_indent(&mut out, &mut at_line_start, indent, ")");
+                        paren_depth = paren_depth.saturating_sub(1);
+                    }
+                    "[" | "]" | "." | "@" | "::" => {
+                        if symbol == "@" && !at_line_start {
+                            out.push('\n');
+                            at_line_start = true;
+                        }
+                        write_with_indent(&mut out, &mut at_line_start, indent, &symbol);
+                    }
+                    "++" | "--" => {
+                        write_with_indent(&mut out, &mut at_line_start, indent, &symbol);
+                    }
+                    "?" | ":" | "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^="
+                    | "==" | "!=" | "<=" | ">=" | "&&" | "||" | "+" | "-" | "*" | "/" | "%"
+                    | "&" | "|" | "^" | "->" => {
+                        ensure_space(&mut out, at_line_start);
+                        write_with_indent(&mut out, &mut at_line_start, indent, &symbol);
+                        out.push(' ');
+                    }
+                    "<" | ">" | "<<" | ">>" | ">>>" | "<<=" | ">>=" | ">>>=" => {
+                        if is_generic_angle(&prev_kind, prev_text.as_deref(), next_text.as_deref())
+                        {
+                            write_with_indent(&mut out, &mut at_line_start, indent, &symbol);
+                        } else {
+                            ensure_space(&mut out, at_line_start);
+                            write_with_indent(&mut out, &mut at_line_start, indent, &symbol);
+                            out.push(' ');
+                        }
+                    }
+                    _ => {
+                        if needs_space_before(&prev_text, &symbol, at_line_start) {
+                            ensure_space(&mut out, at_line_start);
+                        }
+                        write_with_indent(&mut out, &mut at_line_start, indent, &symbol);
+                    }
+                }
+
+                prev_text = Some(symbol);
+                prev_kind = Some(TokenKind::Symbol);
+                i += consumed;
             }
             _ => {
-                if should_space_before_token(prev, token, ir.source) {
+                let text = token_text(ir.source, token);
+                if needs_space_before(&prev_text, text, at_line_start) {
                     ensure_space(&mut out, at_line_start);
                 }
                 write_with_indent(&mut out, &mut at_line_start, indent, text);
+                prev_text = Some(text.to_owned());
+                prev_kind = Some(token.kind);
+                i += 1;
             }
         }
-
-        prev = Some(token);
-        index += 1;
     }
 
-    trim_redundant_blank_lines(&out)
+    let mut normalized = trim_redundant_blank_lines(&out);
+    if !normalized.is_empty() && !normalized.ends_with('\n') {
+        normalized.push('\n');
+    }
+    normalized
 }
 
 fn collect_meaningful_tokens<'a>(ir: &'a FormatIr<'a>) -> Vec<&'a Token> {
@@ -153,54 +181,131 @@ fn collect_meaningful_tokens<'a>(ir: &'a FormatIr<'a>) -> Vec<&'a Token> {
         .collect::<Vec<_>>()
 }
 
-fn should_space_before_open_paren(prev: Option<&Token>, source: &str) -> bool {
-    let Some(prev) = prev else {
-        return false;
+fn next_symbol_text(tokens: &[&Token], mut index: usize, source: &str) -> Option<String> {
+    if index >= tokens.len() {
+        return None;
+    }
+    let token = tokens[index];
+    if token.kind == TokenKind::Symbol {
+        let (text, _) = read_symbol(tokens, index, source);
+        return Some(text);
+    }
+    if matches!(
+        token.kind,
+        TokenKind::Word | TokenKind::StringLiteral | TokenKind::CharLiteral
+    ) {
+        return Some(token_text(source, token).to_owned());
+    }
+    index += 1;
+    if index < tokens.len() {
+        return Some(token_text(source, tokens[index]).to_owned());
+    }
+    None
+}
+
+fn read_symbol(tokens: &[&Token], index: usize, source: &str) -> (String, usize) {
+    let first = token_text(source, tokens[index]);
+    let second = tokens.get(index + 1).map(|token| token_text(source, token));
+    let third = tokens.get(index + 2).map(|token| token_text(source, token));
+
+    let combined3 = match (first, second, third) {
+        (">", Some(">"), Some(">")) => Some(">>>"),
+        _ => None,
     };
-    if prev.kind != TokenKind::Word {
+    if let Some(op) = combined3 {
+        let fourth = tokens.get(index + 3).map(|token| token_text(source, token));
+        if matches!((op, fourth), (">>>", Some("="))) {
+            return (String::from(">>>="), 4);
+        }
+        return (op.to_owned(), 3);
+    }
+
+    let combined2 = match (first, second) {
+        ("=", Some("=")) => Some("=="),
+        ("!", Some("=")) => Some("!="),
+        ("<", Some("=")) => Some("<="),
+        (">", Some("=")) => Some(">="),
+        ("+", Some("+")) => Some("++"),
+        ("-", Some("-")) => Some("--"),
+        ("&", Some("&")) => Some("&&"),
+        ("|", Some("|")) => Some("||"),
+        ("+", Some("=")) => Some("+="),
+        ("-", Some("=")) => Some("-="),
+        ("*", Some("=")) => Some("*="),
+        ("/", Some("=")) => Some("/="),
+        ("%", Some("=")) => Some("%="),
+        ("&", Some("=")) => Some("&="),
+        ("|", Some("=")) => Some("|="),
+        ("^", Some("=")) => Some("^="),
+        ("<", Some("<")) => Some("<<"),
+        (">", Some(">")) => Some(">>"),
+        ("-", Some(">")) => Some("->"),
+        (":", Some(":")) => Some("::"),
+        _ => None,
+    };
+    if let Some(op) = combined2 {
+        let third = tokens.get(index + 2).map(|token| token_text(source, token));
+        if matches!((op, third), ("<<", Some("="))) {
+            return (String::from("<<="), 3);
+        }
+        if matches!((op, third), (">>", Some("="))) {
+            return (String::from(">>="), 3);
+        }
+        return (op.to_owned(), 2);
+    }
+
+    (first.to_owned(), 1)
+}
+
+fn needs_space_before(prev_text: &Option<String>, curr_text: &str, at_line_start: bool) -> bool {
+    if at_line_start {
         return false;
     }
+    let Some(prev) = prev_text else {
+        return false;
+    };
+
+    if matches!(prev.as_str(), "(" | "[" | "." | "@" | "::" | "<" | "<<") {
+        return false;
+    }
+    if matches!(curr_text, ")" | "]" | "." | "," | ";" | "::") {
+        return false;
+    }
+    true
+}
+
+fn needs_space_before_open_paren(prev_text: &Option<String>) -> bool {
+    let Some(prev) = prev_text else {
+        return false;
+    };
     matches!(
-        token_text(source, prev),
+        prev.as_str(),
         "if" | "for" | "while" | "switch" | "catch" | "synchronized"
     )
 }
 
-fn should_space_before_token(prev: Option<&Token>, curr: &Token, source: &str) -> bool {
-    let Some(prev) = prev else {
-        return false;
-    };
-    let prev_text = token_text(source, prev);
-    let curr_text = token_text(source, curr);
-
-    if matches!(prev_text, "(" | "[" | ".") {
-        return false;
+fn is_generic_angle(
+    prev_kind: &Option<TokenKind>,
+    prev_text: Option<&str>,
+    next_text: Option<&str>,
+) -> bool {
+    if matches!(
+        prev_kind,
+        Some(TokenKind::Word | TokenKind::StringLiteral | TokenKind::CharLiteral)
+    ) && matches!(next_text, Some(text) if is_word_like_text(text) || matches!(text, "?" | ">" | "," | "[" | "]"))
+    {
+        return true;
     }
-    if matches!(curr_text, ")" | "]" | "." | "," | ";") {
-        return false;
+    if matches!(prev_text, Some("<" | "," | "?"))
+        && matches!(next_text, Some(text) if is_word_like_text(text) || matches!(text, "?" | ">" | "," | "["))
+    {
+        return true;
     }
-    matches!(
-        (prev.kind, curr.kind),
-        (TokenKind::Word, TokenKind::Word)
-            | (TokenKind::Word, TokenKind::StringLiteral)
-            | (TokenKind::Word, TokenKind::CharLiteral)
-            | (TokenKind::StringLiteral, TokenKind::Word)
-            | (TokenKind::CharLiteral, TokenKind::Word)
-    )
+    false
 }
 
-fn write_space_before_symbol(out: &mut String, prev: Option<&Token>, curr: &Token, source: &str) {
-    if should_space_before_token(prev, curr, source) {
-        ensure_space(out, false);
-        return;
-    }
-
-    if let Some(prev) = prev {
-        let prev_text = token_text(source, prev);
-        if prev.kind == TokenKind::Word || matches!(prev_text, ")" | "]") {
-            ensure_space(out, false);
-        }
-    }
+fn is_word_like_text(text: &str) -> bool {
+    text.chars().all(|ch| ch.is_alphanumeric() || ch == '_')
 }
 
 fn write_with_indent(out: &mut String, at_line_start: &mut bool, indent: usize, text: &str) {
@@ -268,17 +373,6 @@ mod tests {
     }
 
     #[test]
-    fn falls_back_for_comments() {
-        let source = "class A { // keep\n}\n";
-        let lexed = lexer::lex(source);
-        let cst = parser::parse(&lexed);
-        let attachments = comments::attach(&cst, &lexed);
-        let ir = ir::build(&cst, attachments);
-        let printed = print(&ir);
-        assert_eq!(printed.text, source);
-    }
-
-    #[test]
     fn formats_string_and_char_literals() {
         let source = "class A{String s=\"x\";char c='y';}";
         let lexed = lexer::lex(source);
@@ -307,13 +401,27 @@ mod tests {
     }
 
     #[test]
-    fn falls_back_for_angle_brackets() {
+    fn formats_annotation_and_comment() {
+        let source = "class A{@Override public String toString(){//x\nreturn \"x\";}}";
+        let lexed = lexer::lex(source);
+        let cst = parser::parse(&lexed);
+        let attachments = comments::attach(&cst, &lexed);
+        let ir = ir::build(&cst, attachments);
+        let printed = print(&ir);
+        assert_eq!(
+            printed.text,
+            "class A {\n  @Override public String toString() {\n    //x\n    return \"x\";\n  }\n}\n"
+        );
+    }
+
+    #[test]
+    fn keeps_generic_without_spaces_around_angle() {
         let source = "class A{java.util.List<String> xs;}";
         let lexed = lexer::lex(source);
         let cst = parser::parse(&lexed);
         let attachments = comments::attach(&cst, &lexed);
         let ir = ir::build(&cst, attachments);
         let printed = print(&ir);
-        assert_eq!(printed.text, source);
+        assert_eq!(printed.text, "class A {\n  java.util.List<String> xs;\n}\n");
     }
 }
