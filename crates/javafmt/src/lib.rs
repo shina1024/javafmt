@@ -27,105 +27,122 @@ pub fn format_str(input: &str) -> FormatResult {
     let format_ir = ir::build(&cst, attachments);
     let printed = printer::print(&format_ir);
     let emitted = emit::emit(printed);
-    let output = apply_line_ending_policy(reorder_top_level_imports(&emitted), line_ending);
+    let output = apply_line_ending_policy(reorder_top_level_imports(emitted), line_ending);
     let changed = output != input;
     FormatResult { output, changed }
 }
 
-fn reorder_top_level_imports(input: &str) -> String {
-    let lines = input.lines().map(str::to_owned).collect::<Vec<_>>();
-    if lines.is_empty() {
-        return input.to_owned();
+fn reorder_top_level_imports(input: String) -> String {
+    if !input.contains("import ") {
+        return input;
     }
 
-    let mut first_import_idx = None;
-    for (idx, line) in lines.iter().enumerate() {
-        if line.starts_with("import ") {
-            first_import_idx = Some(idx);
-            break;
-        }
-        if line.is_empty() || line.starts_with("package ") {
-            continue;
-        }
-        return input.to_owned();
-    }
+    let maybe_reordered = {
+        let lines = input.lines().collect::<Vec<_>>();
+        if lines.is_empty() {
+            None
+        } else {
+            let mut first_import_idx = None;
+            let mut invalid_prefix = false;
+            for (idx, line) in lines.iter().enumerate() {
+                if line.starts_with("import ") {
+                    first_import_idx = Some(idx);
+                    break;
+                }
+                if line.is_empty() || line.starts_with("package ") {
+                    continue;
+                }
+                invalid_prefix = true;
+                break;
+            }
+            if invalid_prefix {
+                None
+            } else if let Some(start) = first_import_idx {
+                let mut end = start;
+                let mut has_comment_or_other = false;
+                while end < lines.len() {
+                    let line = lines[end];
+                    if line.starts_with("import ") || line.is_empty() {
+                        end += 1;
+                        continue;
+                    }
+                    has_comment_or_other = line.starts_with("//")
+                        || line.starts_with("/*")
+                        || line.starts_with('*')
+                        || line.starts_with("*/");
+                    break;
+                }
+                if has_comment_or_other || end == start {
+                    None
+                } else {
+                    let import_lines = lines[start..end]
+                        .iter()
+                        .copied()
+                        .filter(|line| !line.is_empty())
+                        .collect::<Vec<_>>();
+                    if import_lines.is_empty() {
+                        None
+                    } else {
+                        let mut static_imports = import_lines
+                            .iter()
+                            .copied()
+                            .filter(|line| line.starts_with("import static "))
+                            .collect::<Vec<_>>();
+                        let mut normal_imports = import_lines
+                            .iter()
+                            .copied()
+                            .filter(|line| !line.starts_with("import static "))
+                            .collect::<Vec<_>>();
+                        static_imports.sort_unstable();
+                        normal_imports.sort_unstable();
 
-    let Some(start) = first_import_idx else {
-        return input.to_owned();
+                        let mut out = String::with_capacity(input.len() + 4);
+                        let mut first_line = true;
+                        let mut push_line = |line: &str| {
+                            if !first_line {
+                                out.push('\n');
+                            }
+                            out.push_str(line);
+                            first_line = false;
+                        };
+
+                        for line in &lines[..start] {
+                            push_line(line);
+                        }
+                        for line in &static_imports {
+                            push_line(line);
+                        }
+                        if !static_imports.is_empty() && !normal_imports.is_empty() {
+                            push_line("");
+                        }
+                        for line in &normal_imports {
+                            push_line(line);
+                        }
+
+                        if end < lines.len() {
+                            push_line("");
+                            let mut suffix_start = end;
+                            while suffix_start < lines.len() && lines[suffix_start].is_empty() {
+                                suffix_start += 1;
+                            }
+                            for line in &lines[suffix_start..] {
+                                push_line(line);
+                            }
+                        }
+
+                        if input.ends_with('\n') {
+                            out.push('\n');
+                        }
+                        if out != input { Some(out) } else { None }
+                    }
+                }
+            } else {
+                None
+            }
+        }
     };
 
-    let mut end = start;
-    let mut has_comment_or_other = false;
-    while end < lines.len() {
-        let line = lines[end].as_str();
-        if line.starts_with("import ") || line.is_empty() {
-            end += 1;
-            continue;
-        }
-        has_comment_or_other = line.starts_with("//")
-            || line.starts_with("/*")
-            || line.starts_with('*')
-            || line.starts_with("*/");
-        if has_comment_or_other {
-            break;
-        }
-        break;
-    }
-    if has_comment_or_other || end == start {
-        return input.to_owned();
-    }
-
-    let import_lines = lines[start..end]
-        .iter()
-        .filter(|line| !line.is_empty())
-        .cloned()
-        .collect::<Vec<_>>();
-    if import_lines.is_empty() {
-        return input.to_owned();
-    }
-
-    let mut static_imports = import_lines
-        .iter()
-        .filter(|line| line.starts_with("import static "))
-        .cloned()
-        .collect::<Vec<_>>();
-    let mut normal_imports = import_lines
-        .iter()
-        .filter(|line| !line.starts_with("import static "))
-        .cloned()
-        .collect::<Vec<_>>();
-
-    static_imports.sort();
-    normal_imports.sort();
-
-    let mut reordered = Vec::with_capacity(import_lines.len() + 1);
-    reordered.extend(static_imports.iter().cloned());
-    if !static_imports.is_empty() && !normal_imports.is_empty() {
-        reordered.push(String::new());
-    }
-    reordered.extend(normal_imports.iter().cloned());
-
-    let mut out = Vec::with_capacity(lines.len() + 2);
-    out.extend(lines[..start].iter().cloned());
-    out.extend(reordered.into_iter());
-    if end < lines.len() {
-        out.push(String::new());
-        let mut suffix_start = end;
-        while suffix_start < lines.len() && lines[suffix_start].is_empty() {
-            suffix_start += 1;
-        }
-        out.extend(lines[suffix_start..].iter().cloned());
-    }
-
-    let mut joined = out.join("\n");
-    if input.ends_with('\n') {
-        joined.push('\n');
-    }
-    if joined == input {
-        input.to_owned()
-    } else {
-        joined
-    }
+    maybe_reordered.unwrap_or(input)
 }
 
 fn detect_line_ending(input: &str) -> LineEnding {

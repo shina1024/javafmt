@@ -210,7 +210,7 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                                 i += consumed;
                                 continue;
                             }
-                            match symbol.as_str() {
+                            match symbol {
                                 "." | "[" | "]" | "::" => {
                                     write_with_indent(
                                         &mut out,
@@ -259,7 +259,7 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                                     );
                                 }
                             }
-                            label_prev_text = Some(symbol);
+                            label_prev_text = Some(symbol.to_owned());
                             i += consumed;
                             continue;
                         }
@@ -370,7 +370,7 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                 let (symbol, consumed) = read_symbol(tokens.as_slice(), i, ir.source);
                 let next_text = next_symbol_text(tokens.as_slice(), i + consumed, ir.source);
 
-                match symbol.as_str() {
+                match symbol {
                     "@" => {
                         if !at_line_start {
                             out.push('\n');
@@ -950,7 +950,7 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                     }
                 }
 
-                prev_text = Some(symbol.clone());
+                prev_text = Some(symbol.to_owned());
                 prev_kind = Some(TokenKind::Symbol);
                 i += consumed;
 
@@ -1116,7 +1116,7 @@ fn starts_block_lambda_rhs(tokens: &[&Token], mut index: usize, source: &str) ->
         let token = tokens[index];
         if token.kind == TokenKind::Symbol {
             let (symbol, consumed) = read_symbol(tokens, index, source);
-            match symbol.as_str() {
+            match symbol {
                 ";" if local_paren_depth == 0 => return false,
                 "(" => {
                     local_paren_depth += 1;
@@ -1148,7 +1148,7 @@ fn should_break_annotation_arguments(tokens: &[&Token], mut index: usize, source
         let token = tokens[index];
         if token.kind == TokenKind::Symbol {
             let (symbol, consumed) = read_symbol(tokens, index, source);
-            match symbol.as_str() {
+            match symbol {
                 "(" => local_paren_depth += 1,
                 ")" => {
                     if local_paren_depth == 0 {
@@ -1187,7 +1187,7 @@ fn should_break_call_arguments(tokens: &[&Token], mut index: usize, source: &str
         scanned_chars += token.end.saturating_sub(token.start);
         if token.kind == TokenKind::Symbol {
             let (symbol, consumed) = read_symbol(tokens, index, source);
-            match symbol.as_str() {
+            match symbol {
                 "(" => local_paren_depth += 1,
                 ")" => {
                     if local_paren_depth == 0 {
@@ -1233,7 +1233,7 @@ fn is_explicit_type_argument_call(tokens: &[&Token], index: usize, source: &str)
         match token.kind {
             TokenKind::Symbol => {
                 let (symbol, _) = read_symbol(tokens, cursor, source);
-                return matches!(symbol.as_str(), ">" | ">>" | ">>>");
+                return matches!(symbol, ">" | ">>" | ">>>");
             }
             TokenKind::Word | TokenKind::StringLiteral | TokenKind::CharLiteral => return false,
             _ => {}
@@ -1270,7 +1270,7 @@ fn should_break_assignment_rhs(tokens: &[&Token], mut index: usize, source: &str
         }
         if token.kind == TokenKind::Symbol {
             let (symbol, consumed) = read_symbol(tokens, index, source);
-            match symbol.as_str() {
+            match symbol {
                 ";" if local_paren_depth == 0 && local_bracket_depth == 0 => break,
                 "(" => {
                     if local_paren_depth == 0 && local_bracket_depth == 0 {
@@ -1310,7 +1310,7 @@ fn next_member_looks_like_method(tokens: &[&Token], mut index: usize, source: &s
         let token = tokens[index];
         if token.kind == TokenKind::Symbol {
             let (symbol, consumed) = read_symbol(tokens, index, source);
-            match symbol.as_str() {
+            match symbol {
                 "(" => {
                     local_paren_depth += 1;
                     if local_paren_depth == 1 {
@@ -1333,7 +1333,7 @@ fn next_member_looks_like_method(tokens: &[&Token], mut index: usize, source: &s
     false
 }
 
-fn next_symbol_text(tokens: &[&Token], mut index: usize, source: &str) -> Option<String> {
+fn next_symbol_text<'a>(tokens: &[&Token], mut index: usize, source: &'a str) -> Option<&'a str> {
     if index >= tokens.len() {
         return None;
     }
@@ -1346,16 +1346,16 @@ fn next_symbol_text(tokens: &[&Token], mut index: usize, source: &str) -> Option
         token.kind,
         TokenKind::Word | TokenKind::StringLiteral | TokenKind::CharLiteral
     ) {
-        return Some(token_text(source, token).to_owned());
+        return Some(token_text(source, token));
     }
     index += 1;
     if index < tokens.len() {
-        return Some(token_text(source, tokens[index]).to_owned());
+        return Some(token_text(source, tokens[index]));
     }
     None
 }
 
-fn read_symbol(tokens: &[&Token], index: usize, source: &str) -> (String, usize) {
+fn read_symbol<'a>(tokens: &[&Token], index: usize, source: &'a str) -> (&'a str, usize) {
     let first = token_text(source, tokens[index]);
     let second = tokens.get(index + 1).map(|token| token_text(source, token));
     let third = tokens.get(index + 2).map(|token| token_text(source, token));
@@ -1373,9 +1373,9 @@ fn read_symbol(tokens: &[&Token], index: usize, source: &str) -> (String, usize)
     if let Some(op) = combined3 {
         let fourth = tokens.get(index + 3).map(|token| token_text(source, token));
         if matches!((op, fourth), (">>>", Some("="))) {
-            return (String::from(">>>="), 4);
+            return (">>>=", 4);
         }
-        return (op.to_owned(), 3);
+        return (op, 3);
     }
 
     let combined2 = match (first, second) {
@@ -1404,15 +1404,15 @@ fn read_symbol(tokens: &[&Token], index: usize, source: &str) -> (String, usize)
     if let Some(op) = combined2 {
         let third = tokens.get(index + 2).map(|token| token_text(source, token));
         if matches!((op, third), ("<<", Some("="))) {
-            return (String::from("<<="), 3);
+            return ("<<=", 3);
         }
         if matches!((op, third), (">>", Some("="))) {
-            return (String::from(">>="), 3);
+            return (">>=", 3);
         }
-        return (op.to_owned(), 2);
+        return (op, 2);
     }
 
-    (first.to_owned(), 1)
+    (first, 1)
 }
 
 fn needs_space_before(prev_text: &Option<String>, curr_text: &str, at_line_start: bool) -> bool {
@@ -1504,7 +1504,7 @@ fn looks_like_type_argument_list(tokens: &[&Token], mut index: usize, source: &s
             }
             TokenKind::Symbol => {
                 let (symbol, consumed) = read_symbol(tokens, index, source);
-                match symbol.as_str() {
+                match symbol {
                     "<" => depth += 1,
                     ">" => {
                         depth = depth.saturating_sub(1);
@@ -1578,7 +1578,7 @@ fn is_inline_initializer_brace(
             continue;
         }
         let (symbol, consumed) = read_symbol(tokens, i, source);
-        match symbol.as_str() {
+        match symbol {
             "{" => depth += 1,
             "}" => {
                 depth = depth.saturating_sub(1);
