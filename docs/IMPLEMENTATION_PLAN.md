@@ -290,6 +290,9 @@ javafmt/
   scripts/
     update-gjf.ps1
     run-diff.ps1
+  tools/
+    gjf/
+      version.txt
   docs/
     IMPLEMENTATION_PLAN.md
 ```

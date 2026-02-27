@@ -10,7 +10,7 @@ use std::process::{Command, ExitCode, Stdio};
 #[command(about = "Reference comparison tool against google-java-format")]
 struct Cli {
     #[arg(long, help = "Path to google-java-format jar file")]
-    gjf_jar: PathBuf,
+    gjf_jar: Option<PathBuf>,
     #[arg(required = true)]
     inputs: Vec<PathBuf>,
 }
@@ -27,6 +27,7 @@ fn main() -> ExitCode {
 
 fn run() -> Result<ExitCode, String> {
     let cli = Cli::parse();
+    let gjf_jar = resolve_gjf_jar(cli.gjf_jar)?;
     let files = collect_java_files(&cli.inputs)?;
     let mut mismatch = false;
 
@@ -34,7 +35,7 @@ fn run() -> Result<ExitCode, String> {
         let source = fs::read_to_string(file)
             .map_err(|e| format!("failed to read {}: {e}", file.display()))?;
         let ours = format_str(&source).output;
-        let reference = format_with_gjf(&cli.gjf_jar, &source)
+        let reference = format_with_gjf(&gjf_jar, &source)
             .map_err(|e| format!("failed to run GJF for {}: {e}", file.display()))?;
         if ours != reference {
             mismatch = true;
@@ -46,6 +47,34 @@ fn run() -> Result<ExitCode, String> {
         Ok(ExitCode::from(1))
     } else {
         Ok(ExitCode::SUCCESS)
+    }
+}
+
+fn resolve_gjf_jar(explicit: Option<PathBuf>) -> Result<PathBuf, String> {
+    if let Some(path) = explicit {
+        if path.exists() {
+            return Ok(path);
+        }
+        return Err(format!("GJF jar not found: {}", path.display()));
+    }
+
+    let version_file = PathBuf::from("tools/gjf/version.txt");
+    let version = fs::read_to_string(&version_file)
+        .map_err(|e| format!("failed to read {}: {e}", version_file.display()))?;
+    let version = version.trim();
+    if version.is_empty() || version == "latest" {
+        return Err(String::from(
+            "tools/gjf/version.txt must contain a resolved version; run scripts/update-gjf.ps1",
+        ));
+    }
+
+    let jar = PathBuf::from(format!(
+        "tools/gjf/google-java-format-{version}-all-deps.jar"
+    ));
+    if jar.exists() {
+        Ok(jar)
+    } else {
+        Err(format!("GJF jar not found: {}", jar.display()))
     }
 }
 
