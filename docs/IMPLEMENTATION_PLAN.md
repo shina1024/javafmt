@@ -27,7 +27,7 @@ Initial implementation should target full-file formatting first. Line-range form
 - custom style profiles
 - IDE incremental formatting protocol
 - semantic refactoring
-- automatic import sorting or code cleanup beyond formatting
+- semantic import cleanup or code cleanup beyond GJF-compatible formatting behavior
 
 ## 4. System Architecture
 
@@ -319,3 +319,34 @@ javafmt/
 Naming policy:
 
 - use `reference` in module/folder names for GJF comparison tooling
+
+## 16. Current Status Snapshot (2026-02-27)
+
+Implementation is actively in progress and already beyond Phase 0/1:
+
+- current branch head includes compatibility improvements through commit `4e03260`
+- pinned GJF version: `1.34.1` (`tools/gjf/version.txt`)
+- latest successful CI run: `22495083534` (both `test` and `reference` jobs succeeded)
+
+Latest local reference gate result (`target/gjf-report-local.json`):
+
+- runs: `3`
+- files: `79`
+- mismatches: `0`
+- `gjf_over_javafmt_ratio`: `2659.04074266736`
+
+Implemented compatibility coverage in recent cycles:
+
+- top-level package/import spacing
+- module directive grouping and continuation (`to`, `with`)
+- enum constant body/comma behavior
+- try-with-resources multiline handling
+- annotation handling (`@interface`, named argument wrapping)
+- explicit generic-call wrapping and diamond operator spacing
+- top-level import ordering for GJF compatibility (`static` first, lexical order in groups)
+
+Known caveats / guardrails:
+
+- some GJF edge inputs are non-idempotent (example: `do { /*x*/ a(); } while (...)` with specific comment layouts)
+- such unstable inputs should not be promoted into `fixtures/java` gate corpus
+- when import block contains comments, keep original order (skip reorder pass for safety)
