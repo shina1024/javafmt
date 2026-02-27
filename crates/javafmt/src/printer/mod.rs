@@ -57,6 +57,10 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
     let mut prev_kind: Option<TokenKind> = None;
     let mut annotation_active = false;
     let mut annotation_paren_depth = 0usize;
+    let mut annotation_brace_depth = 0usize;
+    let mut annotation_multiline_args_active = false;
+    let mut annotation_multiline_args_paren_depth = 0usize;
+    let mut annotation_multiline_base_indent = 0usize;
     let mut pending_switch_block = false;
     let mut pending_type_block = false;
     let mut pending_enum_block = false;
@@ -74,6 +78,9 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
     let mut ternary_depth = 0usize;
     let mut pending_top_level_directive: Option<TopLevelDirective> = None;
     let mut pending_module_directive: Option<ModuleDirective> = None;
+    let mut call_args_continuation_active = false;
+    let mut call_args_continuation_paren_depth = 0usize;
+    let mut call_args_continuation_base_indent = 0usize;
 
     while i < tokens.len() {
         let token = tokens[i];
@@ -109,6 +116,10 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                     && out.ends_with('\n')
                     && token_text(ir.source, tokens[i - 1]) == ";"
                     && !source_gap_has_newline(ir.source, tokens[i - 1].end, token.start);
+                let leading_block_comment = i > 0
+                    && at_line_start
+                    && out.ends_with('\n')
+                    && token_text(ir.source, tokens[i - 1]) == "{";
                 if attach_after_statement {
                     out.pop();
                     at_line_start = false;
@@ -116,10 +127,18 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                 ensure_space(&mut out, at_line_start);
                 let text = token_text(ir.source, token);
                 let current_indent = active_indent(indent, &block_stack);
-                write_with_indent(&mut out, &mut at_line_start, current_indent, text);
+                let comment_indent = if leading_block_comment {
+                    current_indent + 1
+                } else {
+                    current_indent
+                };
+                write_with_indent(&mut out, &mut at_line_start, comment_indent, text);
                 if text.ends_with('\n') {
                     at_line_start = true;
                 } else if attach_after_statement {
+                    out.push('\n');
+                    at_line_start = true;
+                } else if leading_block_comment {
                     out.push('\n');
                     at_line_start = true;
                 }
@@ -328,6 +347,12 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                         out.push('\n');
                         at_line_start = true;
                         annotation_active = false;
+                        annotation_brace_depth = 0;
+                        if annotation_multiline_args_active {
+                            indent = annotation_multiline_base_indent;
+                            annotation_multiline_args_active = false;
+                            annotation_multiline_args_paren_depth = 0;
+                        }
                     }
                 }
 
@@ -359,9 +384,15 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                         if annotation_declaration {
                             annotation_active = false;
                             annotation_paren_depth = 0;
+                            annotation_brace_depth = 0;
+                            annotation_multiline_args_active = false;
+                            annotation_multiline_args_paren_depth = 0;
                         } else {
                             annotation_active = true;
                             annotation_paren_depth = 0;
+                            annotation_brace_depth = 0;
+                            annotation_multiline_args_active = false;
+                            annotation_multiline_args_paren_depth = 0;
                         }
                     }
                     "{" => {
@@ -370,6 +401,9 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                         }
                         let current_indent = active_indent(indent, &block_stack);
                         write_with_indent(&mut out, &mut at_line_start, current_indent, "{");
+                        if annotation_active && annotation_paren_depth > 0 {
+                            annotation_brace_depth += 1;
+                        }
 
                         let is_empty = next_text.as_deref() == Some("}");
                         let inline_brace = (is_inline_initializer_brace(
@@ -416,6 +450,9 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                             in_switch_case: false,
                             in_enum_constants: false,
                         });
+                        if annotation_active && annotation_brace_depth > 0 {
+                            annotation_brace_depth -= 1;
+                        }
                         if frame.multiline {
                             indent = indent.saturating_sub(1);
                             if !at_line_start {
@@ -470,6 +507,11 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                         generic_depth = 0;
                         if paren_depth == 0 {
                             ternary_depth = 0;
+                            if call_args_continuation_active {
+                                indent = call_args_continuation_base_indent;
+                                call_args_continuation_active = false;
+                                call_args_continuation_paren_depth = 0;
+                            }
                         }
                         if paren_depth == 0 {
                             if let Some(frame) = block_stack.last_mut() {
@@ -582,7 +624,13 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                                 && frame.in_enum_constants
                                 && paren_depth == 0
                         });
-                        if enum_constants_comma || (module_continuation_active && paren_depth == 0)
+                        let annotation_args_comma = annotation_multiline_args_active
+                            && paren_depth == annotation_multiline_args_paren_depth
+                            && annotation_paren_depth == 1
+                            && annotation_brace_depth == 0;
+                        if enum_constants_comma
+                            || (module_continuation_active && paren_depth == 0)
+                            || annotation_args_comma
                         {
                             out.push('\n');
                             at_line_start = true;
@@ -596,17 +644,60 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                         }
                         let current_indent = active_indent(indent, &block_stack);
                         write_with_indent(&mut out, &mut at_line_start, current_indent, "(");
+                        let should_break_after_open_paren =
+                            is_explicit_type_argument_call(tokens.as_slice(), i, ir.source)
+                                && should_break_call_arguments(
+                                    tokens.as_slice(),
+                                    i + consumed,
+                                    ir.source,
+                                );
                         paren_depth += 1;
                         if prev_text.as_deref() == Some("try") {
                             try_resource_paren_depth = paren_depth;
                         }
                         if annotation_active {
                             annotation_paren_depth += 1;
+                            if annotation_paren_depth == 1
+                                && should_break_annotation_arguments(
+                                    tokens.as_slice(),
+                                    i + consumed,
+                                    ir.source,
+                                )
+                            {
+                                out.push('\n');
+                                at_line_start = true;
+                                if !annotation_multiline_args_active {
+                                    annotation_multiline_args_active = true;
+                                    annotation_multiline_args_paren_depth = paren_depth;
+                                    annotation_multiline_base_indent = indent;
+                                    indent += 2;
+                                }
+                            }
+                        }
+                        if should_break_after_open_paren {
+                            out.push('\n');
+                            at_line_start = true;
+                            if !call_args_continuation_active {
+                                call_args_continuation_active = true;
+                                call_args_continuation_paren_depth = paren_depth;
+                                call_args_continuation_base_indent = indent;
+                                indent += 2;
+                            }
                         }
                     }
                     ")" => {
                         let closes_try_resource_paren =
                             try_resource_paren_depth > 0 && paren_depth == try_resource_paren_depth;
+                        let closes_annotation_multiline_args = annotation_multiline_args_active
+                            && paren_depth == annotation_multiline_args_paren_depth;
+                        let closes_call_args_continuation = call_args_continuation_active
+                            && paren_depth == call_args_continuation_paren_depth;
+                        if closes_annotation_multiline_args {
+                            indent = annotation_multiline_base_indent;
+                        }
+                        if closes_call_args_continuation {
+                            indent = call_args_continuation_base_indent;
+                        }
                         let current_indent = active_indent(indent, &block_stack);
                         write_with_indent(&mut out, &mut at_line_start, current_indent, ")");
                         paren_depth = paren_depth.saturating_sub(1);
@@ -619,6 +710,14 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                         }
                         if annotation_active && annotation_paren_depth > 0 {
                             annotation_paren_depth -= 1;
+                        }
+                        if closes_annotation_multiline_args {
+                            annotation_multiline_args_active = false;
+                            annotation_multiline_args_paren_depth = 0;
+                        }
+                        if closes_call_args_continuation {
+                            call_args_continuation_active = false;
+                            call_args_continuation_paren_depth = 0;
                         }
                     }
                     "." | "[" | "]" | "::" => {
@@ -862,6 +961,12 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                             out.push('\n');
                             at_line_start = true;
                             annotation_active = false;
+                            annotation_brace_depth = 0;
+                            if annotation_multiline_args_active {
+                                indent = annotation_multiline_base_indent;
+                                annotation_multiline_args_active = false;
+                                annotation_multiline_args_paren_depth = 0;
+                            }
                         }
                     }
                 }
@@ -1033,6 +1138,114 @@ fn starts_block_lambda_rhs(tokens: &[&Token], mut index: usize, source: &str) ->
     false
 }
 
+fn should_break_annotation_arguments(tokens: &[&Token], mut index: usize, source: &str) -> bool {
+    let mut local_paren_depth = 0usize;
+    let mut local_brace_depth = 0usize;
+    let mut saw_top_level_equals = false;
+    let mut saw_top_level_comma = false;
+
+    while index < tokens.len() {
+        let token = tokens[index];
+        if token.kind == TokenKind::Symbol {
+            let (symbol, consumed) = read_symbol(tokens, index, source);
+            match symbol.as_str() {
+                "(" => local_paren_depth += 1,
+                ")" => {
+                    if local_paren_depth == 0 {
+                        break;
+                    }
+                    local_paren_depth -= 1;
+                }
+                "{" => local_brace_depth += 1,
+                "}" => local_brace_depth = local_brace_depth.saturating_sub(1),
+                "=" if local_paren_depth == 0 && local_brace_depth == 0 => {
+                    saw_top_level_equals = true;
+                }
+                "," if local_paren_depth == 0 && local_brace_depth == 0 => {
+                    saw_top_level_comma = true;
+                }
+                _ => {}
+            }
+            index += consumed;
+        } else {
+            index += 1;
+        }
+    }
+
+    saw_top_level_equals && saw_top_level_comma
+}
+
+fn should_break_call_arguments(tokens: &[&Token], mut index: usize, source: &str) -> bool {
+    let mut local_paren_depth = 0usize;
+    let mut local_bracket_depth = 0usize;
+    let mut local_brace_depth = 0usize;
+    let mut scanned_chars = 0usize;
+    let mut top_level_comma_count = 0usize;
+
+    while index < tokens.len() {
+        let token = tokens[index];
+        scanned_chars += token.end.saturating_sub(token.start);
+        if token.kind == TokenKind::Symbol {
+            let (symbol, consumed) = read_symbol(tokens, index, source);
+            match symbol.as_str() {
+                "(" => local_paren_depth += 1,
+                ")" => {
+                    if local_paren_depth == 0 {
+                        break;
+                    }
+                    local_paren_depth -= 1;
+                }
+                "[" => local_bracket_depth += 1,
+                "]" => local_bracket_depth = local_bracket_depth.saturating_sub(1),
+                "{" => local_brace_depth += 1,
+                "}" => local_brace_depth = local_brace_depth.saturating_sub(1),
+                "," if local_paren_depth == 0
+                    && local_bracket_depth == 0
+                    && local_brace_depth == 0 =>
+                {
+                    top_level_comma_count += 1;
+                }
+                _ => {}
+            }
+            index += consumed;
+        } else {
+            index += 1;
+        }
+    }
+
+    scanned_chars >= 30 && top_level_comma_count >= 1
+}
+
+fn is_explicit_type_argument_call(tokens: &[&Token], index: usize, source: &str) -> bool {
+    if index == 0
+        || !tokens
+            .get(index - 1)
+            .is_some_and(|token| token.kind == TokenKind::Word)
+    {
+        return false;
+    }
+
+    let mut cursor = index.saturating_sub(2);
+    loop {
+        let Some(token) = tokens.get(cursor) else {
+            return false;
+        };
+        match token.kind {
+            TokenKind::Symbol => {
+                let (symbol, _) = read_symbol(tokens, cursor, source);
+                return matches!(symbol.as_str(), ">" | ">>" | ">>>");
+            }
+            TokenKind::Word | TokenKind::StringLiteral | TokenKind::CharLiteral => return false,
+            _ => {}
+        }
+        if cursor == 0 {
+            break;
+        }
+        cursor -= 1;
+    }
+    false
+}
+
 fn should_break_assignment_rhs(tokens: &[&Token], mut index: usize, source: &str) -> bool {
     if let Some(next) = tokens.get(index)
         && next.kind == TokenKind::Word
@@ -1046,6 +1259,8 @@ fn should_break_assignment_rhs(tokens: &[&Token], mut index: usize, source: &str
     let mut dot_after_call_count = 0usize;
     let mut scanned_chars = 0usize;
     let mut saw_sorted_call = false;
+    let mut saw_top_level_method_call = false;
+    let mut saw_top_level_angle = false;
 
     while index < tokens.len() {
         let token = tokens[index];
@@ -1057,10 +1272,18 @@ fn should_break_assignment_rhs(tokens: &[&Token], mut index: usize, source: &str
             let (symbol, consumed) = read_symbol(tokens, index, source);
             match symbol.as_str() {
                 ";" if local_paren_depth == 0 && local_bracket_depth == 0 => break,
-                "(" => local_paren_depth += 1,
+                "(" => {
+                    if local_paren_depth == 0 && local_bracket_depth == 0 {
+                        saw_top_level_method_call = true;
+                    }
+                    local_paren_depth += 1;
+                }
                 ")" => local_paren_depth = local_paren_depth.saturating_sub(1),
                 "[" => local_bracket_depth += 1,
                 "]" => local_bracket_depth = local_bracket_depth.saturating_sub(1),
+                "<" | ">" | ">>" | ">>>" if local_paren_depth == 0 && local_bracket_depth == 0 => {
+                    saw_top_level_angle = true;
+                }
                 "." if local_paren_depth == 0 && local_bracket_depth == 0 => {
                     if index > 0 && token_text(source, tokens[index - 1]) == ")" {
                         dot_after_call_count += 1;
@@ -1074,7 +1297,9 @@ fn should_break_assignment_rhs(tokens: &[&Token], mut index: usize, source: &str
         }
     }
 
-    dot_after_call_count >= 4 && scanned_chars >= 60 && saw_sorted_call
+    let sorted_chain = dot_after_call_count >= 4 && scanned_chars >= 60 && saw_sorted_call;
+    let long_generic_call = scanned_chars >= 90 && saw_top_level_method_call && saw_top_level_angle;
+    sorted_chain || long_generic_call
 }
 
 fn next_member_looks_like_method(tokens: &[&Token], mut index: usize, source: &str) -> bool {
@@ -1229,6 +1454,16 @@ fn is_generic_open_angle(
     next_text: Option<&str>,
     at_line_start: bool,
 ) -> bool {
+    if next_text == Some(">")
+        && next_symbol_text(tokens, index + 2, source).as_deref() == Some("(")
+        && (matches!(
+            prev_kind,
+            Some(TokenKind::Word | TokenKind::StringLiteral | TokenKind::CharLiteral)
+        ) || matches!(prev_text, Some("." | "new")))
+    {
+        return true;
+    }
+
     if !looks_like_type_argument_list(tokens, index, source) {
         return false;
     }
@@ -1901,6 +2136,54 @@ mod tests {
         let ir = ir::build(&cst, attachments);
         let printed = print(&ir);
         assert!(printed.text.contains("@interface B {"));
+    }
+
+    #[test]
+    fn keeps_block_comment_on_its_own_line_after_open_brace() {
+        let source =
+            "class A{void f(){do{/*x*/a();}while(cond());}void a(){}boolean cond(){return true;}}";
+        let lexed = lexer::lex(source);
+        let cst = parser::parse(&lexed);
+        let attachments = comments::attach(&cst, &lexed);
+        let ir = ir::build(&cst, attachments);
+        let printed = print(&ir);
+        assert!(printed.text.contains("do {\n        /*x*/\n      a();"));
+    }
+
+    #[test]
+    fn breaks_named_annotation_arguments_multiline() {
+        let source = "class A{@Anno(values={1,2,3},name=\"x\") void f(){} @interface Anno{int[] values();String name();}}";
+        let lexed = lexer::lex(source);
+        let cst = parser::parse(&lexed);
+        let attachments = comments::attach(&cst, &lexed);
+        let ir = ir::build(&cst, attachments);
+        let printed = print(&ir);
+        assert!(printed.text.contains("@Anno(\n"));
+        assert!(printed.text.contains("values = {1, 2, 3},\n"));
+        assert!(printed.text.contains("name = \"x\")"));
+    }
+
+    #[test]
+    fn breaks_long_generic_assignment_rhs() {
+        let source = "class A{void f(){var m=java.util.Map.<String,java.util.List<java.util.Set<Integer>>>of(\"k\",java.util.List.of(java.util.Set.of(1,2)));}}";
+        let lexed = lexer::lex(source);
+        let cst = parser::parse(&lexed);
+        let attachments = comments::attach(&cst, &lexed);
+        let ir = ir::build(&cst, attachments);
+        let printed = print(&ir);
+        assert!(printed.text.contains("var m =\n"));
+    }
+
+    #[test]
+    fn keeps_diamond_operator_without_spaces() {
+        let source = "class A{record R<T>(T x){} R<Integer> r=new R<>(1);} ";
+        let lexed = lexer::lex(source);
+        let cst = parser::parse(&lexed);
+        let attachments = comments::attach(&cst, &lexed);
+        let ir = ir::build(&cst, attachments);
+        let printed = print(&ir);
+        assert!(printed.text.contains("new R<>(1);"));
+        assert!(!printed.text.contains("R < >"));
     }
 
     #[test]
