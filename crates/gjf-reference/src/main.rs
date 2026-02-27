@@ -2,7 +2,7 @@ use clap::Parser;
 use javafmt::format_str;
 use std::fs;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
 
 #[derive(Debug, Parser)]
@@ -12,7 +12,7 @@ struct Cli {
     #[arg(long, help = "Path to google-java-format jar file")]
     gjf_jar: PathBuf,
     #[arg(required = true)]
-    files: Vec<PathBuf>,
+    inputs: Vec<PathBuf>,
 }
 
 fn main() -> ExitCode {
@@ -27,9 +27,10 @@ fn main() -> ExitCode {
 
 fn run() -> Result<ExitCode, String> {
     let cli = Cli::parse();
+    let files = collect_java_files(&cli.inputs)?;
     let mut mismatch = false;
 
-    for file in &cli.files {
+    for file in &files {
         let source = fs::read_to_string(file)
             .map_err(|e| format!("failed to read {}: {e}", file.display()))?;
         let ours = format_str(&source).output;
@@ -48,7 +49,42 @@ fn run() -> Result<ExitCode, String> {
     }
 }
 
-fn format_with_gjf(gjf_jar: &PathBuf, input: &str) -> Result<String, String> {
+fn collect_java_files(inputs: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
+    let mut files = Vec::new();
+    for input in inputs {
+        collect_java_files_rec(input, &mut files)?;
+    }
+    files.sort();
+    files.dedup();
+
+    if files.is_empty() {
+        return Err(String::from("no Java files found in inputs"));
+    }
+    Ok(files)
+}
+
+fn collect_java_files_rec(path: &Path, files: &mut Vec<PathBuf>) -> Result<(), String> {
+    let metadata = fs::metadata(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    if metadata.is_dir() {
+        let mut entries = fs::read_dir(path)
+            .map_err(|e| format!("{}: {e}", path.display()))?
+            .map(|entry| entry.map(|entry| entry.path()))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("{}: {e}", path.display()))?;
+        entries.sort();
+        for entry in entries {
+            collect_java_files_rec(&entry, files)?;
+        }
+        return Ok(());
+    }
+
+    if path.extension().is_some_and(|ext| ext == "java") {
+        files.push(path.to_path_buf());
+    }
+    Ok(())
+}
+
+fn format_with_gjf(gjf_jar: &Path, input: &str) -> Result<String, String> {
     let mut child = Command::new("java")
         .arg("-jar")
         .arg(gjf_jar)
