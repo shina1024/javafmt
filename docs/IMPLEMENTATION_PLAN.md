@@ -107,6 +107,7 @@ Prioritize compatibility in this order:
 - report mismatch summary and sampled diffs
 - emit machine-readable JSON reports for CI trend tracking
 - publish reference reports as CI artifacts for baseline comparisons
+- include per-run timing fields for `javafmt` and GJF in reference reports
 - fail CI when mismatch rate exceeds threshold
 
 ### 7.3 Property/Safety Tests

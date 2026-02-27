@@ -27,7 +27,9 @@ struct ComparisonReport {
     files_checked: usize,
     mismatches: usize,
     mismatch_files: Vec<String>,
-    elapsed_ms: u128,
+    javafmt_elapsed_us: u128,
+    gjf_elapsed_us: u128,
+    elapsed_us: u128,
 }
 
 fn main() -> ExitCode {
@@ -46,13 +48,20 @@ fn run() -> Result<ExitCode, String> {
     let gjf_jar = resolve_gjf_jar(cli.gjf_jar)?;
     let files = collect_java_files(&cli.inputs)?;
     let mut mismatch_files = Vec::new();
+    let mut javafmt_elapsed_us = 0u128;
+    let mut gjf_elapsed_us = 0u128;
 
     for file in &files {
         let source = fs::read_to_string(file)
             .map_err(|e| format!("failed to read {}: {e}", file.display()))?;
+        let ours_started = Instant::now();
         let ours = format_str(&source).output;
+        javafmt_elapsed_us += ours_started.elapsed().as_micros();
+
+        let gjf_started = Instant::now();
         let reference = format_with_gjf(&gjf_jar, &source)
             .map_err(|e| format!("failed to run GJF for {}: {e}", file.display()))?;
+        gjf_elapsed_us += gjf_started.elapsed().as_micros();
         if ours != reference {
             println!("mismatch: {}", file.display());
             mismatch_files.push(file.display().to_string());
@@ -63,12 +72,18 @@ fn run() -> Result<ExitCode, String> {
         files_checked: files.len(),
         mismatches: mismatch_files.len(),
         mismatch_files,
-        elapsed_ms: started.elapsed().as_millis(),
+        javafmt_elapsed_us,
+        gjf_elapsed_us,
+        elapsed_us: started.elapsed().as_micros(),
     };
 
     println!(
-        "checked={} mismatches={} elapsed_ms={}",
-        report.files_checked, report.mismatches, report.elapsed_ms
+        "checked={} mismatches={} javafmt_us={} gjf_us={} elapsed_us={}",
+        report.files_checked,
+        report.mismatches,
+        report.javafmt_elapsed_us,
+        report.gjf_elapsed_us,
+        report.elapsed_us
     );
 
     if let Some(report_path) = cli.report {
