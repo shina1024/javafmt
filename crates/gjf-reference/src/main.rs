@@ -1,6 +1,7 @@
 use clap::Parser;
 use javafmt::format_str;
 use serde::Serialize;
+use std::collections::BTreeSet;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -18,18 +19,42 @@ struct Cli {
         help = "Write JSON report (checked files, mismatch count, mismatch files)"
     )]
     report: Option<PathBuf>,
+    #[arg(long, default_value_t = 1, help = "Number of repeated runs")]
+    runs: usize,
+    #[arg(
+        long,
+        default_value_t = 0,
+        help = "Fail when mismatches exceed this value"
+    )]
+    max_mismatches: usize,
+    #[arg(
+        long,
+        help = "Fail when (GJF elapsed / javafmt elapsed) is below this value"
+    )]
+    min_gjf_over_javafmt: Option<f64>,
     #[arg(required = true)]
     inputs: Vec<PathBuf>,
 }
 
 #[derive(Debug, Serialize)]
 struct ComparisonReport {
-    files_checked: usize,
+    runs: usize,
+    files: usize,
+    comparisons: usize,
     mismatches: usize,
     mismatch_files: Vec<String>,
     javafmt_elapsed_us: u128,
     gjf_elapsed_us: u128,
+    javafmt_avg_us_per_file: f64,
+    gjf_avg_us_per_file: f64,
+    gjf_over_javafmt_ratio: f64,
     elapsed_us: u128,
+}
+
+#[derive(Debug)]
+struct SourceFile {
+    path: PathBuf,
+    source: String,
 }
 
 fn main() -> ExitCode {
@@ -44,45 +69,73 @@ fn main() -> ExitCode {
 
 fn run() -> Result<ExitCode, String> {
     let cli = Cli::parse();
+    if cli.runs == 0 {
+        return Err(String::from("--runs must be >= 1"));
+    }
+
     let started = Instant::now();
     let gjf_jar = resolve_gjf_jar(cli.gjf_jar)?;
     let files = collect_java_files(&cli.inputs)?;
-    let mut mismatch_files = Vec::new();
-    let mut javafmt_elapsed_us = 0u128;
-    let mut gjf_elapsed_us = 0u128;
+    let sources = load_sources(&files)?;
 
-    for file in &files {
-        let source = fs::read_to_string(file)
-            .map_err(|e| format!("failed to read {}: {e}", file.display()))?;
-        let ours_started = Instant::now();
-        let ours = format_str(&source).output;
-        javafmt_elapsed_us += ours_started.elapsed().as_micros();
+    let mut mismatch_files = BTreeSet::new();
+    let mut javafmt_elapsed_ns = 0u128;
+    let mut gjf_elapsed_ns = 0u128;
 
-        let gjf_started = Instant::now();
-        let reference = format_with_gjf(&gjf_jar, &source)
-            .map_err(|e| format!("failed to run GJF for {}: {e}", file.display()))?;
-        gjf_elapsed_us += gjf_started.elapsed().as_micros();
-        if ours != reference {
-            println!("mismatch: {}", file.display());
-            mismatch_files.push(file.display().to_string());
+    for run_index in 0..cli.runs {
+        for item in &sources {
+            let ours_started = Instant::now();
+            let ours = format_str(&item.source).output;
+            javafmt_elapsed_ns += ours_started.elapsed().as_nanos();
+
+            let gjf_started = Instant::now();
+            let reference = format_with_gjf(&gjf_jar, &item.source)
+                .map_err(|e| format!("failed to run GJF for {}: {e}", item.path.display()))?;
+            gjf_elapsed_ns += gjf_started.elapsed().as_nanos();
+
+            if ours != reference {
+                if mismatch_files.insert(item.path.display().to_string()) {
+                    println!("mismatch: {}", item.path.display());
+                } else {
+                    println!("mismatch(run={}): {}", run_index + 1, item.path.display());
+                }
+            }
         }
     }
 
+    let comparisons = sources.len() * cli.runs;
+    let javafmt_elapsed_us = javafmt_elapsed_ns / 1_000;
+    let gjf_elapsed_us = gjf_elapsed_ns / 1_000;
+    let javafmt_avg_us_per_file = javafmt_elapsed_us as f64 / comparisons as f64;
+    let gjf_avg_us_per_file = gjf_elapsed_us as f64 / comparisons as f64;
+    let gjf_over_javafmt_ratio = if javafmt_elapsed_ns == 0 {
+        1_000_000.0
+    } else {
+        gjf_elapsed_ns as f64 / javafmt_elapsed_ns as f64
+    };
+
     let report = ComparisonReport {
-        files_checked: files.len(),
+        runs: cli.runs,
+        files: sources.len(),
+        comparisons,
         mismatches: mismatch_files.len(),
-        mismatch_files,
+        mismatch_files: mismatch_files.into_iter().collect::<Vec<_>>(),
         javafmt_elapsed_us,
         gjf_elapsed_us,
+        javafmt_avg_us_per_file,
+        gjf_avg_us_per_file,
+        gjf_over_javafmt_ratio,
         elapsed_us: started.elapsed().as_micros(),
     };
 
     println!(
-        "checked={} mismatches={} javafmt_us={} gjf_us={} elapsed_us={}",
-        report.files_checked,
+        "runs={} files={} mismatches={} javafmt_us={} gjf_us={} ratio={:.3} elapsed_us={}",
+        report.runs,
+        report.files,
         report.mismatches,
         report.javafmt_elapsed_us,
         report.gjf_elapsed_us,
+        report.gjf_over_javafmt_ratio,
         report.elapsed_us
     );
 
@@ -91,11 +144,38 @@ fn run() -> Result<ExitCode, String> {
         println!("report: {}", report_path.display());
     }
 
-    if report.mismatches > 0 {
-        Ok(ExitCode::from(1))
-    } else {
-        Ok(ExitCode::SUCCESS)
+    if report.mismatches > cli.max_mismatches {
+        eprintln!(
+            "gate failed: mismatches={} > max_mismatches={}",
+            report.mismatches, cli.max_mismatches
+        );
+        return Ok(ExitCode::from(1));
     }
+
+    if let Some(min_ratio) = cli.min_gjf_over_javafmt {
+        if report.gjf_over_javafmt_ratio < min_ratio {
+            eprintln!(
+                "gate failed: gjf_over_javafmt_ratio={:.3} < min_gjf_over_javafmt={:.3}",
+                report.gjf_over_javafmt_ratio, min_ratio
+            );
+            return Ok(ExitCode::from(1));
+        }
+    }
+
+    Ok(ExitCode::SUCCESS)
+}
+
+fn load_sources(files: &[PathBuf]) -> Result<Vec<SourceFile>, String> {
+    let mut sources = Vec::with_capacity(files.len());
+    for file in files {
+        let source = fs::read_to_string(file)
+            .map_err(|e| format!("failed to read {}: {e}", file.display()))?;
+        sources.push(SourceFile {
+            path: file.clone(),
+            source,
+        });
+    }
+    Ok(sources)
 }
 
 fn write_report(path: &Path, report: &ComparisonReport) -> Result<(), String> {

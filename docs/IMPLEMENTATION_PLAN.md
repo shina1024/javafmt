@@ -56,6 +56,13 @@ Formatter pipeline:
    - emit formatted text with selected line ending mode
    - validate token-equivalence in debug/test mode
 
+### 4.1 Dual-Path Execution Model
+
+- **Fast path (default):** token-driven single-pass formatting for unambiguous/common syntax.
+- **Structured path (fallback):** parser-assisted formatting for ambiguous/high-risk syntax constructs.
+- **Dispatch rule:** choose fast path first, switch to structured path only for constructs known to cause ambiguity.
+- **Constraint:** fallback must reuse existing lex/parse artifacts and must not re-lex/re-parse full files repeatedly.
+
 ## 5. Design Principles for Speed
 
 - single-pass or near-single-pass stages in hot paths
@@ -68,6 +75,9 @@ Formatter pipeline:
 - parallelize across files, not within a single file formatting operation
 - keep parallelism bounded by memory budget and preserve deterministic output order
 - warm-cache friendly data layout
+- hard complexity target: O(n) with respect to input bytes/tokens for the common path
+- no per-file unbounded backtracking or repeated full-token rescans in hot loops
+- compatibility fixes must preserve the fast-path eligibility rate for common code patterns
 
 ## 6. GJF Compatibility Strategy
 
@@ -123,6 +133,7 @@ Prioritize compatibility in this order:
 - files/sec and MB/sec metrics
 - memory peak tracking
 - repeatable reference timing collection (`scripts/bench-reference.ps1`)
+- gate-oriented reference checks with repeated runs (`gjf-reference --runs`)
 
 ## 8. CLI Plan (gofmt-like UX)
 
@@ -218,6 +229,9 @@ Suggested hard gate examples:
 - compatibility rate: >= target for current milestone
 - performance regression: <= agreed threshold
 - memory regression: <= agreed threshold
+- CI reference gate: `mismatches <= 0` on reference corpus
+- CI speed gate: `gjf_over_javafmt_ratio >= 1.10` with repeated runs on reference corpus
+- CI policy: compatibility improvements that violate speed gate are rejected until optimized
 
 ## 11. Risks and Mitigations
 
