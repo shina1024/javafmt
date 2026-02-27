@@ -51,13 +51,23 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
         let token = tokens[i];
         match token.kind {
             TokenKind::LineComment => {
+                if i > 0
+                    && at_line_start
+                    && out.ends_with('\n')
+                    && token_text(ir.source, tokens[i - 1]) == "{"
+                    && !source_gap_has_newline(ir.source, tokens[i - 1].end, token.start)
+                {
+                    out.pop();
+                    at_line_start = false;
+                }
                 ensure_space(&mut out, at_line_start);
+                let normalized_comment = normalize_line_comment_text(token_text(ir.source, token));
                 let current_indent = active_indent(indent, &block_stack);
                 write_with_indent(
                     &mut out,
                     &mut at_line_start,
                     current_indent,
-                    token_text(ir.source, token),
+                    &normalized_comment,
                 );
                 out.push('\n');
                 at_line_start = true;
@@ -66,11 +76,23 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                 i += 1;
             }
             TokenKind::BlockComment => {
+                let attach_after_statement = i > 0
+                    && at_line_start
+                    && out.ends_with('\n')
+                    && token_text(ir.source, tokens[i - 1]) == ";"
+                    && !source_gap_has_newline(ir.source, tokens[i - 1].end, token.start);
+                if attach_after_statement {
+                    out.pop();
+                    at_line_start = false;
+                }
                 ensure_space(&mut out, at_line_start);
                 let text = token_text(ir.source, token);
                 let current_indent = active_indent(indent, &block_stack);
                 write_with_indent(&mut out, &mut at_line_start, current_indent, text);
                 if text.ends_with('\n') {
+                    at_line_start = true;
+                } else if attach_after_statement {
+                    out.push('\n');
                     at_line_start = true;
                 }
                 prev_text = Some(String::from("/*"));
@@ -903,6 +925,20 @@ fn is_unary_prefix_context(prev_text: Option<&str>) -> bool {
     )
 }
 
+fn source_gap_has_newline(source: &str, start: usize, end: usize) -> bool {
+    source[start..end].contains('\n')
+}
+
+fn normalize_line_comment_text(text: &str) -> String {
+    if let Some(content) = text.strip_prefix("//")
+        && !content.is_empty()
+        && !content.starts_with(' ')
+    {
+        return format!("// {content}");
+    }
+    text.to_owned()
+}
+
 fn write_with_indent(out: &mut String, at_line_start: &mut bool, indent: usize, text: &str) {
     if *at_line_start {
         for _ in 0..indent {
@@ -1005,7 +1041,7 @@ mod tests {
         let printed = print(&ir);
         assert_eq!(
             printed.text,
-            "class A {\n  @Override\n  public String toString() {\n    //x\n    return \"x\";\n  }\n}\n"
+            "class A {\n  @Override\n  public String toString() { // x\n    return \"x\";\n  }\n}\n"
         );
     }
 
@@ -1180,5 +1216,28 @@ mod tests {
         let ir = ir::build(&cst, attachments);
         let printed = print(&ir);
         assert!(printed.text.contains("case 1, 2 -> 1;"));
+    }
+
+    #[test]
+    fn attaches_line_comment_after_open_brace() {
+        let source = "class A{void f(){//@x\nx();}}";
+        let lexed = lexer::lex(source);
+        let cst = parser::parse(&lexed);
+        let attachments = comments::attach(&cst, &lexed);
+        let ir = ir::build(&cst, attachments);
+        let printed = print(&ir);
+        assert!(printed.text.contains("void f() { // @x"));
+    }
+
+    #[test]
+    fn attaches_block_comment_to_previous_statement_when_inline() {
+        let source = "class A{void f(){x();/*y*/z();}}";
+        let lexed = lexer::lex(source);
+        let cst = parser::parse(&lexed);
+        let attachments = comments::attach(&cst, &lexed);
+        let ir = ir::build(&cst, attachments);
+        let printed = print(&ir);
+        assert!(printed.text.contains("x(); /*y*/\n"));
+        assert!(printed.text.contains("z();"));
     }
 }

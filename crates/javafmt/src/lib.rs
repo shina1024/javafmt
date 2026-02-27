@@ -32,7 +32,29 @@ pub fn format_str(input: &str) -> FormatResult {
 }
 
 fn detect_line_ending(input: &str) -> LineEnding {
-    if input.contains("\r\n") {
+    let bytes = input.as_bytes();
+    let mut i = 0usize;
+    let mut crlf_count = 0usize;
+    let mut other_newline_count = 0usize;
+
+    while i < bytes.len() {
+        if bytes[i] == b'\r' {
+            if i + 1 < bytes.len() && bytes[i + 1] == b'\n' {
+                crlf_count += 1;
+                i += 2;
+            } else {
+                other_newline_count += 1;
+                i += 1;
+            }
+            continue;
+        }
+        if bytes[i] == b'\n' {
+            other_newline_count += 1;
+        }
+        i += 1;
+    }
+
+    if crlf_count > 0 && other_newline_count == 0 {
         LineEnding::Crlf
     } else {
         LineEnding::Lf
@@ -92,6 +114,15 @@ mod tests {
         let result = format_str(input);
         assert_eq!(result.output, "class A {}\r\n");
         assert!(!result.changed);
+    }
+
+    #[test]
+    fn mixed_newlines_fall_back_to_lf_output() {
+        let input = "class A {\r\n}\n";
+        let result = format_str(input);
+        assert!(!result.output.contains('\r'));
+        assert!(result.output.ends_with('\n'));
+        assert!(result.changed);
     }
 
     #[test]
