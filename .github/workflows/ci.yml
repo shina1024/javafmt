@@ -37,4 +37,9 @@ jobs:
           curl -fsSL -o "tools/gjf/google-java-format-${VERSION}-all-deps.jar" \
             "https://github.com/google/google-java-format/releases/download/v${VERSION}/google-java-format-${VERSION}-all-deps.jar"
       - name: Reference diff
-        run: cargo run -p gjf-reference -- fixtures/java
+        run: cargo run -p gjf-reference -- --report target/gjf-report.json fixtures/java
+      - name: Upload reference report
+        uses: actions/upload-artifact@v4
+        with:
+          name: gjf-reference-report
+          path: target/gjf-report.json
