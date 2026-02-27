@@ -13,8 +13,13 @@ pub struct FormatResult {
 }
 
 pub fn format_str(input: &str) -> FormatResult {
-    let output = normalize_newlines(input);
-    let output = ensure_trailing_newline(output);
+    let normalized = normalize_newlines(input);
+    let lexed = lexer::lex(&normalized);
+    let cst = parser::parse(&lexed);
+    let attachments = comments::attach(&cst, &lexed);
+    let format_ir = ir::build(&cst, attachments);
+    let printed = printer::print(&format_ir);
+    let output = emit::emit(printed);
     let changed = output != input;
     FormatResult { output, changed }
 }
@@ -37,14 +42,6 @@ fn normalize_newlines(input: &str) -> String {
         out.push(ch);
     }
     out
-}
-
-fn ensure_trailing_newline(mut input: String) -> String {
-    if input.is_empty() || input.ends_with('\n') {
-        return input;
-    }
-    input.push('\n');
-    input
 }
 
 #[cfg(test)]
