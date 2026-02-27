@@ -11,6 +11,8 @@ enum BlockKind {
     Normal,
     Switch,
     TypeBody,
+    EnumBody,
+    ModuleBody,
     Inline,
 }
 
@@ -19,6 +21,7 @@ struct BlockFrame {
     multiline: bool,
     kind: BlockKind,
     in_switch_case: bool,
+    in_enum_constants: bool,
 }
 
 pub fn print(ir: &FormatIr<'_>) -> PrintedDoc {
@@ -41,10 +44,17 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
     let mut annotation_paren_depth = 0usize;
     let mut pending_switch_block = false;
     let mut pending_type_block = false;
+    let mut pending_enum_block = false;
+    let mut pending_module_block = false;
     let mut pending_non_sealed = false;
     let mut lambda_continuation_active = false;
     let mut lambda_continuation_base_indent = 0usize;
     let mut lambda_continuation_base_block_depth = 0usize;
+    let mut try_resource_paren_depth = 0usize;
+    let mut try_resource_continuation_active = false;
+    let mut try_resource_continuation_base_indent = 0usize;
+    let mut module_continuation_active = false;
+    let mut module_continuation_base_indent = 0usize;
     let mut generic_depth = 0usize;
 
     while i < tokens.len() {
@@ -255,8 +265,29 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                 if word == "switch" {
                     pending_switch_block = true;
                 }
+                if word == "enum" {
+                    pending_enum_block = true;
+                }
+                if word == "module" {
+                    pending_module_block = true;
+                }
                 if is_type_declaration_keyword(word) {
                     pending_type_block = true;
+                }
+
+                if block_stack
+                    .last()
+                    .is_some_and(|frame| frame.kind == BlockKind::ModuleBody)
+                    && paren_depth == 0
+                    && matches!(word, "to" | "with")
+                {
+                    out.push('\n');
+                    at_line_start = true;
+                    if !module_continuation_active {
+                        module_continuation_active = true;
+                        module_continuation_base_indent = indent;
+                        indent += 2;
+                    }
                 }
                 i += 1;
 
@@ -302,14 +333,20 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                         write_with_indent(&mut out, &mut at_line_start, current_indent, "{");
 
                         let is_empty = next_text.as_deref() == Some("}");
-                        let inline_brace = is_inline_initializer_brace(
+                        let inline_brace = (is_inline_initializer_brace(
                             tokens.as_slice(),
                             i,
                             ir.source,
                             &prev_text,
-                        ) && !is_empty;
+                        ) || (annotation_active
+                            && prev_text.as_deref() == Some("(")))
+                            && !is_empty;
                         let kind = if pending_switch_block {
                             BlockKind::Switch
+                        } else if pending_module_block {
+                            BlockKind::ModuleBody
+                        } else if pending_enum_block {
+                            BlockKind::EnumBody
                         } else if pending_type_block {
                             BlockKind::TypeBody
                         } else if inline_brace {
@@ -319,10 +356,13 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                         };
                         pending_switch_block = false;
                         pending_type_block = false;
+                        pending_enum_block = false;
+                        pending_module_block = false;
                         block_stack.push(BlockFrame {
                             multiline: !is_empty && !inline_brace,
                             kind,
                             in_switch_case: false,
+                            in_enum_constants: kind == BlockKind::EnumBody,
                         });
                         if !is_empty && !inline_brace {
                             out.push('\n');
@@ -335,6 +375,7 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                             multiline: true,
                             kind: BlockKind::Normal,
                             in_switch_case: false,
+                            in_enum_constants: false,
                         });
                         if frame.multiline {
                             indent = indent.saturating_sub(1);
@@ -347,11 +388,13 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                         let current_indent = active_indent(indent, &block_stack);
                         write_with_indent(&mut out, &mut at_line_start, current_indent, "}");
 
-                        let parent_is_type_body = block_stack
-                            .last()
-                            .is_some_and(|parent| parent.kind == BlockKind::TypeBody);
+                        let parent_is_type_body = block_stack.last().is_some_and(|parent| {
+                            matches!(parent.kind, BlockKind::TypeBody | BlockKind::EnumBody)
+                        });
                         if next_text.as_deref() == Some(";") {
                             // keep same line for "};"
+                        } else if next_text.as_deref() == Some(")") {
+                            // keep same line for "})"
                         } else if frame.kind == BlockKind::Inline {
                             // keep inline initializers on one line
                         } else if matches!(next_text.as_deref(), Some("else" | "catch" | "finally"))
@@ -378,19 +421,35 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                         write_with_indent(&mut out, &mut at_line_start, current_indent, ";");
                         pending_switch_block = false;
                         pending_type_block = false;
+                        pending_enum_block = false;
+                        pending_module_block = false;
                         generic_depth = 0;
+                        if paren_depth == 0 {
+                            if let Some(frame) = block_stack.last_mut() {
+                                if frame.kind == BlockKind::EnumBody && frame.in_enum_constants {
+                                    frame.in_enum_constants = false;
+                                }
+                            }
+                        }
                         if lambda_continuation_active
                             && block_stack.len() == lambda_continuation_base_block_depth
                         {
                             indent = lambda_continuation_base_indent;
                             lambda_continuation_active = false;
                         }
+                        if module_continuation_active && paren_depth == 0 {
+                            indent = module_continuation_base_indent;
+                            module_continuation_active = false;
+                        }
                         if paren_depth == 0 {
                             out.push('\n');
                             at_line_start = true;
-                            let in_type_body = block_stack
+                            let in_type_body = block_stack.last().is_some_and(|frame| {
+                                matches!(frame.kind, BlockKind::TypeBody | BlockKind::EnumBody)
+                            });
+                            let in_module_body = block_stack
                                 .last()
-                                .is_some_and(|frame| frame.kind == BlockKind::TypeBody);
+                                .is_some_and(|frame| frame.kind == BlockKind::ModuleBody);
                             if in_type_body
                                 && next_text.as_deref() != Some("}")
                                 && next_member_looks_like_method(
@@ -401,14 +460,40 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                             {
                                 out.push('\n');
                             }
+                            if in_module_body && next_text.as_deref() != Some("}") {
+                                out.push('\n');
+                            }
                         } else {
-                            out.push(' ');
+                            if try_resource_paren_depth > 0
+                                && paren_depth == try_resource_paren_depth
+                            {
+                                out.push('\n');
+                                at_line_start = true;
+                                if !try_resource_continuation_active {
+                                    try_resource_continuation_active = true;
+                                    try_resource_continuation_base_indent = indent;
+                                    indent += 2;
+                                }
+                            } else {
+                                out.push(' ');
+                            }
                         }
                     }
                     "," => {
                         let current_indent = active_indent(indent, &block_stack);
                         write_with_indent(&mut out, &mut at_line_start, current_indent, ",");
-                        out.push(' ');
+                        let enum_constants_comma = block_stack.last().is_some_and(|frame| {
+                            frame.kind == BlockKind::EnumBody
+                                && frame.in_enum_constants
+                                && paren_depth == 0
+                        });
+                        if enum_constants_comma || (module_continuation_active && paren_depth == 0)
+                        {
+                            out.push('\n');
+                            at_line_start = true;
+                        } else {
+                            out.push(' ');
+                        }
                     }
                     "(" => {
                         if needs_space_before_open_paren(&prev_text) {
@@ -417,14 +502,26 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                         let current_indent = active_indent(indent, &block_stack);
                         write_with_indent(&mut out, &mut at_line_start, current_indent, "(");
                         paren_depth += 1;
+                        if prev_text.as_deref() == Some("try") {
+                            try_resource_paren_depth = paren_depth;
+                        }
                         if annotation_active {
                             annotation_paren_depth += 1;
                         }
                     }
                     ")" => {
+                        let closes_try_resource_paren =
+                            try_resource_paren_depth > 0 && paren_depth == try_resource_paren_depth;
                         let current_indent = active_indent(indent, &block_stack);
                         write_with_indent(&mut out, &mut at_line_start, current_indent, ")");
                         paren_depth = paren_depth.saturating_sub(1);
+                        if closes_try_resource_paren {
+                            try_resource_paren_depth = 0;
+                            if try_resource_continuation_active {
+                                indent = try_resource_continuation_base_indent;
+                                try_resource_continuation_active = false;
+                            }
+                        }
                         if annotation_active && annotation_paren_depth > 0 {
                             annotation_paren_depth -= 1;
                         }
@@ -688,7 +785,7 @@ fn is_switch_label(word: &str, stack: &[BlockFrame]) -> bool {
 }
 
 fn is_type_declaration_keyword(word: &str) -> bool {
-    matches!(word, "class" | "interface" | "enum" | "record")
+    matches!(word, "class" | "interface" | "record")
 }
 
 fn collect_meaningful_tokens<'a>(ir: &'a FormatIr<'a>) -> Vec<&'a Token> {
@@ -1480,6 +1577,57 @@ mod tests {
         let printed = print(&ir);
         assert!(printed.text.contains("var x =\n"));
         assert!(printed.text.contains("\n            .map("));
+    }
+
+    #[test]
+    fn formats_try_with_multiple_resources_multiline() {
+        let source = "class A{void f(){try(var in1=open();var in2=open2()){use(in1,in2);}catch(Exception e){x();}}java.io.InputStream open(){return null;}java.io.InputStream open2(){return null;}void use(java.io.InputStream a,java.io.InputStream b){}void x(){}}";
+        let lexed = lexer::lex(source);
+        let cst = parser::parse(&lexed);
+        let attachments = comments::attach(&cst, &lexed);
+        let ir = ir::build(&cst, attachments);
+        let printed = print(&ir);
+        assert!(printed.text.contains("try (var in1 = open();\n"));
+        assert!(printed.text.contains("var in2 = open2())"));
+    }
+
+    #[test]
+    fn keeps_annotation_array_inline_when_short() {
+        let source = "class A{@SuppressWarnings({\"unchecked\",\"rawtypes\"}) void f(){}}";
+        let lexed = lexer::lex(source);
+        let cst = parser::parse(&lexed);
+        let attachments = comments::attach(&cst, &lexed);
+        let ir = ir::build(&cst, attachments);
+        let printed = print(&ir);
+        assert!(
+            printed
+                .text
+                .contains("@SuppressWarnings({\"unchecked\", \"rawtypes\"})")
+        );
+    }
+
+    #[test]
+    fn formats_enum_constants_on_separate_lines() {
+        let source = "class A{enum E{A(1),B(2);final int n;E(int n){this.n=n;}}}";
+        let lexed = lexer::lex(source);
+        let cst = parser::parse(&lexed);
+        let attachments = comments::attach(&cst, &lexed);
+        let ir = ir::build(&cst, attachments);
+        let printed = print(&ir);
+        assert!(printed.text.contains("A(1),\n    B(2);"));
+    }
+
+    #[test]
+    fn formats_module_to_and_with_clauses_multiline() {
+        let source = "module m.example{requires java.base;exports a.b;opens a.c to x.y,z.w;uses a.spi.S;provides a.spi.S with a.impl.SImpl;}";
+        let lexed = lexer::lex(source);
+        let cst = parser::parse(&lexed);
+        let attachments = comments::attach(&cst, &lexed);
+        let ir = ir::build(&cst, attachments);
+        let printed = print(&ir);
+        assert!(printed.text.contains("opens a.c to\n"));
+        assert!(printed.text.contains("x.y,\n"));
+        assert!(printed.text.contains("provides a.spi.S with\n"));
     }
 
     #[test]
