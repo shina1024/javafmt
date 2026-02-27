@@ -11,6 +11,7 @@ enum BlockKind {
     Normal,
     Switch,
     TypeBody,
+    Inline,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -44,6 +45,7 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
     let mut lambda_continuation_active = false;
     let mut lambda_continuation_base_indent = 0usize;
     let mut lambda_continuation_base_block_depth = 0usize;
+    let mut generic_depth = 0usize;
 
     while i < tokens.len() {
         let token = tokens[i];
@@ -126,6 +128,17 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                                 i += consumed;
                                 break;
                             }
+                            if symbol == "," {
+                                write_with_indent(
+                                    &mut out,
+                                    &mut at_line_start,
+                                    current_indent,
+                                    ",",
+                                );
+                                out.push(' ');
+                                i += consumed;
+                                continue;
+                            }
 
                             ensure_space(&mut out, at_line_start);
                             write_with_indent(
@@ -152,6 +165,12 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                 }
 
                 if !suppress_space_for_non_sealed
+                    && !is_tight_after_generic_close(
+                        prev_text.as_deref(),
+                        tokens.as_slice(),
+                        i,
+                        ir.source,
+                    )
                     && needs_space_before(&prev_text, word, at_line_start)
                 {
                     ensure_space(&mut out, at_line_start);
@@ -200,21 +219,24 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                         write_with_indent(&mut out, &mut at_line_start, current_indent, "{");
 
                         let is_empty = next_text.as_deref() == Some("}");
+                        let inline_brace = prev_text.as_deref() == Some("]") && !is_empty;
                         let kind = if pending_switch_block {
                             BlockKind::Switch
                         } else if pending_type_block {
                             BlockKind::TypeBody
+                        } else if inline_brace {
+                            BlockKind::Inline
                         } else {
                             BlockKind::Normal
                         };
                         pending_switch_block = false;
                         pending_type_block = false;
                         block_stack.push(BlockFrame {
-                            multiline: !is_empty,
+                            multiline: !is_empty && !inline_brace,
                             kind,
                             in_switch_case: false,
                         });
-                        if !is_empty {
+                        if !is_empty && !inline_brace {
                             out.push('\n');
                             at_line_start = true;
                             indent += 1;
@@ -242,8 +264,12 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                             .is_some_and(|parent| parent.kind == BlockKind::TypeBody);
                         if next_text.as_deref() == Some(";") {
                             // keep same line for "};"
+                        } else if frame.kind == BlockKind::Inline {
+                            // keep inline initializers on one line
                         } else if matches!(next_text.as_deref(), Some("else" | "catch" | "finally"))
                         {
+                            out.push(' ');
+                        } else if next_text.as_deref() == Some("while") {
                             out.push(' ');
                         } else if next_text.is_some() {
                             out.push('\n');
@@ -264,6 +290,7 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                         write_with_indent(&mut out, &mut at_line_start, current_indent, ";");
                         pending_switch_block = false;
                         pending_type_block = false;
+                        generic_depth = 0;
                         if lambda_continuation_active
                             && block_stack.len() == lambda_continuation_base_block_depth
                         {
@@ -398,12 +425,16 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                         write_with_indent(&mut out, &mut at_line_start, current_indent, &symbol);
                         out.push(' ');
                     }
-                    "<" | ">" | "<<" | ">>" | ">>>" | "<<=" | ">>=" | ">>>=" => {
+                    "<" => {
                         let generic_like = paren_depth == 0
-                            && is_generic_angle(
+                            && is_generic_open_angle(
+                                tokens.as_slice(),
+                                i,
+                                ir.source,
                                 &prev_kind,
                                 prev_text.as_deref(),
                                 next_text.as_deref(),
+                                at_line_start,
                             );
                         if generic_like {
                             let current_indent = active_indent(indent, &block_stack);
@@ -413,6 +444,7 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                                 current_indent,
                                 &symbol,
                             );
+                            generic_depth += 1;
                         } else {
                             ensure_space(&mut out, at_line_start);
                             let current_indent = active_indent(indent, &block_stack);
@@ -424,6 +456,48 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                             );
                             out.push(' ');
                         }
+                    }
+                    ">" => {
+                        if generic_depth >= 1 {
+                            let current_indent = active_indent(indent, &block_stack);
+                            write_with_indent(&mut out, &mut at_line_start, current_indent, ">");
+                            generic_depth -= 1;
+                        } else {
+                            ensure_space(&mut out, at_line_start);
+                            let current_indent = active_indent(indent, &block_stack);
+                            write_with_indent(&mut out, &mut at_line_start, current_indent, ">");
+                            out.push(' ');
+                        }
+                    }
+                    ">>" => {
+                        if generic_depth >= 2 {
+                            let current_indent = active_indent(indent, &block_stack);
+                            write_with_indent(&mut out, &mut at_line_start, current_indent, ">>");
+                            generic_depth -= 2;
+                        } else {
+                            ensure_space(&mut out, at_line_start);
+                            let current_indent = active_indent(indent, &block_stack);
+                            write_with_indent(&mut out, &mut at_line_start, current_indent, ">>");
+                            out.push(' ');
+                        }
+                    }
+                    ">>>" => {
+                        if generic_depth >= 3 {
+                            let current_indent = active_indent(indent, &block_stack);
+                            write_with_indent(&mut out, &mut at_line_start, current_indent, ">>>");
+                            generic_depth -= 3;
+                        } else {
+                            ensure_space(&mut out, at_line_start);
+                            let current_indent = active_indent(indent, &block_stack);
+                            write_with_indent(&mut out, &mut at_line_start, current_indent, ">>>");
+                            out.push(' ');
+                        }
+                    }
+                    "<<" | "<<=" | ">>=" | ">>>=" => {
+                        ensure_space(&mut out, at_line_start);
+                        let current_indent = active_indent(indent, &block_stack);
+                        write_with_indent(&mut out, &mut at_line_start, current_indent, &symbol);
+                        out.push(' ');
                     }
                     _ => {
                         if needs_space_before(&prev_text, &symbol, at_line_start) {
@@ -649,7 +723,7 @@ fn needs_space_before(prev_text: &Option<String>, curr_text: &str, at_line_start
 
     if matches!(
         prev.as_str(),
-        "(" | "[" | "." | "@" | "::" | "<" | "<<" | "+" | "-" | "!" | "~"
+        "(" | "[" | "{" | "." | "@" | "::" | "<" | "<<" | "+" | "-" | "!" | "~"
     ) {
         return false;
     }
@@ -669,11 +743,23 @@ fn needs_space_before_open_paren(prev_text: &Option<String>) -> bool {
     )
 }
 
-fn is_generic_angle(
+fn is_generic_open_angle(
+    tokens: &[&Token],
+    index: usize,
+    source: &str,
     prev_kind: &Option<TokenKind>,
     prev_text: Option<&str>,
     next_text: Option<&str>,
+    at_line_start: bool,
 ) -> bool {
+    if !looks_like_type_argument_list(tokens, index, source) {
+        return false;
+    }
+
+    if at_line_start || matches!(prev_text, Some("." | "<" | "," | "?" | "&" | "new")) {
+        return true;
+    }
+
     if matches!(
         prev_kind,
         Some(TokenKind::Word | TokenKind::StringLiteral | TokenKind::CharLiteral)
@@ -687,6 +773,78 @@ fn is_generic_angle(
         return true;
     }
     false
+}
+
+fn looks_like_type_argument_list(tokens: &[&Token], mut index: usize, source: &str) -> bool {
+    let mut depth = 1usize;
+    let mut saw_type_token = false;
+    index += 1;
+
+    while index < tokens.len() {
+        let token = tokens[index];
+        match token.kind {
+            TokenKind::Word => {
+                let word = token_text(source, token);
+                if !matches!(word, "extends" | "super") {
+                    saw_type_token = true;
+                }
+                index += 1;
+            }
+            TokenKind::Symbol => {
+                let (symbol, consumed) = read_symbol(tokens, index, source);
+                match symbol.as_str() {
+                    "<" => depth += 1,
+                    ">" => {
+                        depth = depth.saturating_sub(1);
+                        if depth == 0 {
+                            return saw_type_token;
+                        }
+                    }
+                    ">>" => {
+                        if depth == 0 {
+                            return false;
+                        }
+                        if depth <= 2 {
+                            return saw_type_token;
+                        }
+                        depth -= 2;
+                    }
+                    ">>>" => {
+                        if depth == 0 {
+                            return false;
+                        }
+                        if depth <= 3 {
+                            return saw_type_token;
+                        }
+                        depth -= 3;
+                    }
+                    "," | "." | "?" | "[" | "]" | "&" => {}
+                    ";" | "(" | ")" | "{" | "}" | "=" | "==" | "!=" | "<=" | ">=" | "+" | "-"
+                    | "*" | "/" | "%" | "&&" | "||" | ":" | "->" => return false,
+                    _ => return false,
+                }
+                index += consumed;
+            }
+            TokenKind::Whitespace | TokenKind::Newline => {
+                index += 1;
+            }
+            _ => return false,
+        }
+    }
+
+    false
+}
+
+fn is_tight_after_generic_close(
+    prev_text: Option<&str>,
+    tokens: &[&Token],
+    word_index: usize,
+    source: &str,
+) -> bool {
+    if !matches!(prev_text, Some(">" | ">>" | ">>>")) {
+        return false;
+    }
+    next_symbol_text(tokens, word_index + 1, source).as_deref() == Some("(")
 }
 
 fn is_word_like_text(text: &str) -> bool {
@@ -965,5 +1123,62 @@ mod tests {
         let ir = ir::build(&cst, attachments);
         let printed = print(&ir);
         assert!(printed.text.contains("try (var in ="));
+    }
+
+    #[test]
+    fn keeps_do_while_on_single_line_join() {
+        let source =
+            "class A{void f(){do{x();}while(cond());}void x(){}boolean cond(){return true;}}";
+        let lexed = lexer::lex(source);
+        let cst = parser::parse(&lexed);
+        let attachments = comments::attach(&cst, &lexed);
+        let ir = ir::build(&cst, attachments);
+        let printed = print(&ir);
+        assert!(printed.text.contains("} while (cond());"));
+    }
+
+    #[test]
+    fn keeps_array_initializer_inline_for_short_literal() {
+        let source = "class A{void f(){int[] a=new int[]{1,2,3};}}";
+        let lexed = lexer::lex(source);
+        let cst = parser::parse(&lexed);
+        let attachments = comments::attach(&cst, &lexed);
+        let ir = ir::build(&cst, attachments);
+        let printed = print(&ir);
+        assert!(printed.text.contains("new int[] {1, 2, 3};"));
+    }
+
+    #[test]
+    fn keeps_generic_method_invocation_without_extra_spaces() {
+        let source = "class A{void f(){this.<String>m(\"x\");} <T> void m(T t){}}";
+        let lexed = lexer::lex(source);
+        let cst = parser::parse(&lexed);
+        let attachments = comments::attach(&cst, &lexed);
+        let ir = ir::build(&cst, attachments);
+        let printed = print(&ir);
+        assert!(printed.text.contains("this.<String>m(\"x\");"));
+        assert!(printed.text.contains("<T> void m(T t) {}"));
+    }
+
+    #[test]
+    fn spaces_shift_operators_as_binary_ops() {
+        let source = "class A{void f(){int x=a>>b>>>c<<d;}}";
+        let lexed = lexer::lex(source);
+        let cst = parser::parse(&lexed);
+        let attachments = comments::attach(&cst, &lexed);
+        let ir = ir::build(&cst, attachments);
+        let printed = print(&ir);
+        assert!(printed.text.contains("int x = a >> b >>> c << d;"));
+    }
+
+    #[test]
+    fn keeps_switch_multi_labels_comma_spacing() {
+        let source = "class A{int f(int x){return switch(x){case 1,2->1;default->0;};}}";
+        let lexed = lexer::lex(source);
+        let cst = parser::parse(&lexed);
+        let attachments = comments::attach(&cst, &lexed);
+        let ir = ir::build(&cst, attachments);
+        let printed = print(&ir);
+        assert!(printed.text.contains("case 1, 2 -> 1;"));
     }
 }
