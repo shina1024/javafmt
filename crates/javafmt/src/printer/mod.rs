@@ -24,6 +24,21 @@ struct BlockFrame {
     in_enum_constants: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TopLevelDirective {
+    Package,
+    Import,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ModuleDirective {
+    Requires,
+    Exports,
+    Opens,
+    Uses,
+    Provides,
+}
+
 pub fn print(ir: &FormatIr<'_>) -> PrintedDoc {
     PrintedDoc {
         text: format_tokens(ir),
@@ -56,6 +71,9 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
     let mut module_continuation_active = false;
     let mut module_continuation_base_indent = 0usize;
     let mut generic_depth = 0usize;
+    let mut ternary_depth = 0usize;
+    let mut pending_top_level_directive: Option<TopLevelDirective> = None;
+    let mut pending_module_directive: Option<ModuleDirective> = None;
 
     while i < tokens.len() {
         let token = tokens[i];
@@ -274,13 +292,26 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                 if is_type_declaration_keyword(word) {
                     pending_type_block = true;
                 }
-
-                if block_stack
-                    .last()
-                    .is_some_and(|frame| frame.kind == BlockKind::ModuleBody)
+                if block_stack.is_empty()
                     && paren_depth == 0
-                    && matches!(word, "to" | "with")
+                    && pending_top_level_directive.is_none()
+                    && let Some(directive) = top_level_directive_from_word(word)
                 {
+                    pending_top_level_directive = Some(directive);
+                }
+
+                let in_module_body = block_stack
+                    .last()
+                    .is_some_and(|frame| frame.kind == BlockKind::ModuleBody);
+                if in_module_body
+                    && paren_depth == 0
+                    && pending_module_directive.is_none()
+                    && let Some(directive) = module_directive_from_word(word)
+                {
+                    pending_module_directive = Some(directive);
+                }
+
+                if in_module_body && paren_depth == 0 && matches!(word, "to" | "with") {
                     out.push('\n');
                     at_line_start = true;
                     if !module_continuation_active {
@@ -322,8 +353,16 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                         }
                         let current_indent = active_indent(indent, &block_stack);
                         write_with_indent(&mut out, &mut at_line_start, current_indent, "@");
-                        annotation_active = true;
-                        annotation_paren_depth = 0;
+                        let annotation_declaration =
+                            next_symbol_text(tokens.as_slice(), i + consumed, ir.source).as_deref()
+                                == Some("interface");
+                        if annotation_declaration {
+                            annotation_active = false;
+                            annotation_paren_depth = 0;
+                        } else {
+                            annotation_active = true;
+                            annotation_paren_depth = 0;
+                        }
                     }
                     "{" => {
                         if needs_space_before(&prev_text, "{", at_line_start) {
@@ -395,6 +434,8 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                             // keep same line for "};"
                         } else if next_text.as_deref() == Some(")") {
                             // keep same line for "})"
+                        } else if next_text.as_deref() == Some(",") {
+                            // keep same line for "},"
                         } else if frame.kind == BlockKind::Inline {
                             // keep inline initializers on one line
                         } else if matches!(next_text.as_deref(), Some("else" | "catch" | "finally"))
@@ -415,6 +456,9 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                             indent = lambda_continuation_base_indent;
                             lambda_continuation_active = false;
                         }
+                        if frame.kind == BlockKind::ModuleBody {
+                            pending_module_directive = None;
+                        }
                     }
                     ";" => {
                         let current_indent = active_indent(indent, &block_stack);
@@ -424,6 +468,9 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                         pending_enum_block = false;
                         pending_module_block = false;
                         generic_depth = 0;
+                        if paren_depth == 0 {
+                            ternary_depth = 0;
+                        }
                         if paren_depth == 0 {
                             if let Some(frame) = block_stack.last_mut() {
                                 if frame.kind == BlockKind::EnumBody && frame.in_enum_constants {
@@ -460,8 +507,56 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                             {
                                 out.push('\n');
                             }
-                            if in_module_body && next_text.as_deref() != Some("}") {
-                                out.push('\n');
+                            if in_module_body {
+                                if next_text.as_deref() == Some("}") {
+                                    pending_module_directive = None;
+                                } else {
+                                    let next_directive = next_module_directive(
+                                        tokens.as_slice(),
+                                        i + consumed,
+                                        ir.source,
+                                    );
+                                    if let Some(current_directive) = pending_module_directive.take()
+                                    {
+                                        if next_directive
+                                            .is_some_and(|next| next != current_directive)
+                                        {
+                                            out.push('\n');
+                                        }
+                                    }
+                                }
+                            } else {
+                                pending_module_directive = None;
+                            }
+
+                            if block_stack.is_empty() {
+                                if let Some(current_directive) = pending_top_level_directive.take()
+                                {
+                                    let next_directive = next_top_level_directive(
+                                        tokens.as_slice(),
+                                        i + consumed,
+                                        ir.source,
+                                    );
+                                    match current_directive {
+                                        TopLevelDirective::Package => {
+                                            if next_text.as_deref().is_some_and(|next| next != "}")
+                                            {
+                                                out.push('\n');
+                                            }
+                                        }
+                                        TopLevelDirective::Import => {
+                                            if next_directive != Some(TopLevelDirective::Import)
+                                                && next_text
+                                                    .as_deref()
+                                                    .is_some_and(|next| next != "}")
+                                            {
+                                                out.push('\n');
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                pending_top_level_directive = None;
                             }
                         } else {
                             if try_resource_paren_depth > 0
@@ -635,9 +730,39 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                         let current_indent = active_indent(indent, &block_stack);
                         write_with_indent(&mut out, &mut at_line_start, current_indent, &symbol);
                     }
-                    "?" | ":" | "+=" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^=" | "=="
-                    | "!=" | "<=" | ">=" | "&&" | "||" | "*" | "/" | "%" | "&" | "|" | "^"
-                    | "->" => {
+                    "?" => {
+                        ensure_space(&mut out, at_line_start);
+                        let current_indent = active_indent(indent, &block_stack);
+                        write_with_indent(&mut out, &mut at_line_start, current_indent, "?");
+                        out.push(' ');
+                        ternary_depth += 1;
+                    }
+                    ":" => {
+                        if ternary_depth > 0 {
+                            ensure_space(&mut out, at_line_start);
+                            let current_indent = active_indent(indent, &block_stack);
+                            write_with_indent(&mut out, &mut at_line_start, current_indent, ":");
+                            out.push(' ');
+                            ternary_depth = ternary_depth.saturating_sub(1);
+                        } else if is_label_colon_context(
+                            &prev_kind,
+                            prev_text.as_deref(),
+                            next_text.as_deref(),
+                            paren_depth,
+                        ) {
+                            let current_indent = active_indent(indent, &block_stack);
+                            write_with_indent(&mut out, &mut at_line_start, current_indent, ":");
+                            out.push('\n');
+                            at_line_start = true;
+                        } else {
+                            ensure_space(&mut out, at_line_start);
+                            let current_indent = active_indent(indent, &block_stack);
+                            write_with_indent(&mut out, &mut at_line_start, current_indent, ":");
+                            out.push(' ');
+                        }
+                    }
+                    "+=" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^=" | "==" | "!=" | "<="
+                    | ">=" | "&&" | "||" | "*" | "/" | "%" | "&" | "|" | "^" | "->" => {
                         ensure_space(&mut out, at_line_start);
                         let current_indent = active_indent(indent, &block_stack);
                         write_with_indent(&mut out, &mut at_line_start, current_indent, &symbol);
@@ -786,6 +911,91 @@ fn is_switch_label(word: &str, stack: &[BlockFrame]) -> bool {
 
 fn is_type_declaration_keyword(word: &str) -> bool {
     matches!(word, "class" | "interface" | "record")
+}
+
+fn top_level_directive_from_word(word: &str) -> Option<TopLevelDirective> {
+    match word {
+        "package" => Some(TopLevelDirective::Package),
+        "import" => Some(TopLevelDirective::Import),
+        _ => None,
+    }
+}
+
+fn module_directive_from_word(word: &str) -> Option<ModuleDirective> {
+    match word {
+        "requires" => Some(ModuleDirective::Requires),
+        "exports" => Some(ModuleDirective::Exports),
+        "opens" => Some(ModuleDirective::Opens),
+        "uses" => Some(ModuleDirective::Uses),
+        "provides" => Some(ModuleDirective::Provides),
+        _ => None,
+    }
+}
+
+fn next_top_level_directive(
+    tokens: &[&Token],
+    mut index: usize,
+    source: &str,
+) -> Option<TopLevelDirective> {
+    while index < tokens.len() {
+        let token = tokens[index];
+        match token.kind {
+            TokenKind::Word => return top_level_directive_from_word(token_text(source, token)),
+            TokenKind::Symbol => {
+                let (symbol, consumed) = read_symbol(tokens, index, source);
+                if symbol == "}" {
+                    return None;
+                }
+                index += consumed;
+            }
+            _ => {
+                index += 1;
+            }
+        }
+    }
+    None
+}
+
+fn next_module_directive(
+    tokens: &[&Token],
+    mut index: usize,
+    source: &str,
+) -> Option<ModuleDirective> {
+    while index < tokens.len() {
+        let token = tokens[index];
+        match token.kind {
+            TokenKind::Word => return module_directive_from_word(token_text(source, token)),
+            TokenKind::Symbol => {
+                let (symbol, consumed) = read_symbol(tokens, index, source);
+                if symbol == "}" {
+                    return None;
+                }
+                index += consumed;
+            }
+            _ => {
+                index += 1;
+            }
+        }
+    }
+    None
+}
+
+fn is_label_colon_context(
+    prev_kind: &Option<TokenKind>,
+    prev_text: Option<&str>,
+    next_text: Option<&str>,
+    paren_depth: usize,
+) -> bool {
+    if paren_depth != 0 || !matches!(prev_kind, Some(TokenKind::Word)) {
+        return false;
+    }
+    if matches!(prev_text, Some("case" | "default")) {
+        return false;
+    }
+    if matches!(next_text, Some(":" | ";" | "," | ")" | "]" | "}")) {
+        return false;
+    }
+    next_text.is_some()
 }
 
 fn collect_meaningful_tokens<'a>(ir: &'a FormatIr<'a>) -> Vec<&'a Token> {
@@ -1628,6 +1838,69 @@ mod tests {
         assert!(printed.text.contains("opens a.c to\n"));
         assert!(printed.text.contains("x.y,\n"));
         assert!(printed.text.contains("provides a.spi.S with\n"));
+    }
+
+    #[test]
+    fn formats_top_level_package_and_import_blank_lines() {
+        let source = "package p;import java.util.List;class A{}";
+        let lexed = lexer::lex(source);
+        let cst = parser::parse(&lexed);
+        let attachments = comments::attach(&cst, &lexed);
+        let ir = ir::build(&cst, attachments);
+        let printed = print(&ir);
+        assert!(
+            printed
+                .text
+                .starts_with("package p;\n\nimport java.util.List;\n\nclass A {}\n")
+        );
+    }
+
+    #[test]
+    fn formats_statement_label_without_space_before_colon() {
+        let source = "class A{void f(){outer:for(int i=0;i<1;i++){break outer;}}}";
+        let lexed = lexer::lex(source);
+        let cst = parser::parse(&lexed);
+        let attachments = comments::attach(&cst, &lexed);
+        let ir = ir::build(&cst, attachments);
+        let printed = print(&ir);
+        assert!(printed.text.contains("outer:\n"));
+        assert!(!printed.text.contains("outer :"));
+    }
+
+    #[test]
+    fn keeps_enum_constant_body_comma_on_same_line() {
+        let source = "class A{enum E{A{int v(){return 1;}},B;}}";
+        let lexed = lexer::lex(source);
+        let cst = parser::parse(&lexed);
+        let attachments = comments::attach(&cst, &lexed);
+        let ir = ir::build(&cst, attachments);
+        let printed = print(&ir);
+        assert!(printed.text.contains("},\n    B;"));
+    }
+
+    #[test]
+    fn keeps_module_requires_group_compact() {
+        let source =
+            "module m.probe{requires transitive java.base;requires static java.sql;exports p.api;}";
+        let lexed = lexer::lex(source);
+        let cst = parser::parse(&lexed);
+        let attachments = comments::attach(&cst, &lexed);
+        let ir = ir::build(&cst, attachments);
+        let printed = print(&ir);
+        assert!(printed.text.contains(
+            "requires transitive java.base;\n  requires static java.sql;\n\n  exports p.api;"
+        ));
+    }
+
+    #[test]
+    fn keeps_annotation_interface_keyword_together() {
+        let source = "class A{@interface B{}}";
+        let lexed = lexer::lex(source);
+        let cst = parser::parse(&lexed);
+        let attachments = comments::attach(&cst, &lexed);
+        let ir = ir::build(&cst, attachments);
+        let printed = print(&ir);
+        assert!(printed.text.contains("@interface B {"));
     }
 
     #[test]
