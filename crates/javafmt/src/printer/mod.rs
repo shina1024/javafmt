@@ -112,6 +112,20 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                                 i += consumed;
                                 break;
                             }
+                            if symbol == "->" {
+                                ensure_space(&mut out, at_line_start);
+                                write_with_indent(
+                                    &mut out,
+                                    &mut at_line_start,
+                                    current_indent,
+                                    "->",
+                                );
+                                out.push(' ');
+                                prev_text = Some(String::from("->"));
+                                prev_kind = Some(TokenKind::Symbol);
+                                i += consumed;
+                                break;
+                            }
 
                             ensure_space(&mut out, at_line_start);
                             write_with_indent(
@@ -308,6 +322,25 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                         let current_indent = active_indent(indent, &block_stack);
                         write_with_indent(&mut out, &mut at_line_start, current_indent, &symbol);
                     }
+                    "+" => {
+                        if is_unary_prefix_context(prev_text.as_deref()) {
+                            if needs_space_before(&prev_text, "+", at_line_start) {
+                                ensure_space(&mut out, at_line_start);
+                            }
+                            let current_indent = active_indent(indent, &block_stack);
+                            write_with_indent(&mut out, &mut at_line_start, current_indent, "+");
+                        } else {
+                            ensure_space(&mut out, at_line_start);
+                            let current_indent = active_indent(indent, &block_stack);
+                            write_with_indent(
+                                &mut out,
+                                &mut at_line_start,
+                                current_indent,
+                                &symbol,
+                            );
+                            out.push(' ');
+                        }
+                    }
                     "=" => {
                         ensure_space(&mut out, at_line_start);
                         let current_indent = active_indent(indent, &block_stack);
@@ -332,6 +365,12 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                             let current_indent = active_indent(indent, &block_stack);
                             write_with_indent(&mut out, &mut at_line_start, current_indent, "-");
                             pending_non_sealed = true;
+                        } else if is_unary_prefix_context(prev_text.as_deref()) {
+                            if needs_space_before(&prev_text, "-", at_line_start) {
+                                ensure_space(&mut out, at_line_start);
+                            }
+                            let current_indent = active_indent(indent, &block_stack);
+                            write_with_indent(&mut out, &mut at_line_start, current_indent, "-");
                         } else {
                             ensure_space(&mut out, at_line_start);
                             let current_indent = active_indent(indent, &block_stack);
@@ -344,9 +383,16 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                             out.push(' ');
                         }
                     }
+                    "!" | "~" => {
+                        if needs_space_before(&prev_text, &symbol, at_line_start) {
+                            ensure_space(&mut out, at_line_start);
+                        }
+                        let current_indent = active_indent(indent, &block_stack);
+                        write_with_indent(&mut out, &mut at_line_start, current_indent, &symbol);
+                    }
                     "?" | ":" | "+=" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^=" | "=="
-                    | "!=" | "<=" | ">=" | "&&" | "||" | "+" | "*" | "/" | "%" | "&" | "|"
-                    | "^" | "->" => {
+                    | "!=" | "<=" | ">=" | "&&" | "||" | "*" | "/" | "%" | "&" | "|" | "^"
+                    | "->" => {
                         ensure_space(&mut out, at_line_start);
                         let current_indent = active_indent(indent, &block_stack);
                         write_with_indent(&mut out, &mut at_line_start, current_indent, &symbol);
@@ -537,9 +583,15 @@ fn read_symbol(tokens: &[&Token], index: usize, source: &str) -> (String, usize)
     let first = token_text(source, tokens[index]);
     let second = tokens.get(index + 1).map(|token| token_text(source, token));
     let third = tokens.get(index + 2).map(|token| token_text(source, token));
+    let contiguous12 = tokens
+        .get(index + 1)
+        .is_some_and(|next| tokens[index].end == next.start);
+    let contiguous23 = tokens
+        .get(index + 2)
+        .is_some_and(|next| tokens[index + 1].end == next.start);
 
     let combined3 = match (first, second, third) {
-        (">", Some(">"), Some(">")) => Some(">>>"),
+        (">", Some(">"), Some(">")) if contiguous12 && contiguous23 => Some(">>>"),
         _ => None,
     };
     if let Some(op) = combined3 {
@@ -551,26 +603,26 @@ fn read_symbol(tokens: &[&Token], index: usize, source: &str) -> (String, usize)
     }
 
     let combined2 = match (first, second) {
-        ("=", Some("=")) => Some("=="),
-        ("!", Some("=")) => Some("!="),
-        ("<", Some("=")) => Some("<="),
-        (">", Some("=")) => Some(">="),
-        ("+", Some("+")) => Some("++"),
-        ("-", Some("-")) => Some("--"),
-        ("&", Some("&")) => Some("&&"),
-        ("|", Some("|")) => Some("||"),
-        ("+", Some("=")) => Some("+="),
-        ("-", Some("=")) => Some("-="),
-        ("*", Some("=")) => Some("*="),
-        ("/", Some("=")) => Some("/="),
-        ("%", Some("=")) => Some("%="),
-        ("&", Some("=")) => Some("&="),
-        ("|", Some("=")) => Some("|="),
-        ("^", Some("=")) => Some("^="),
-        ("<", Some("<")) => Some("<<"),
-        (">", Some(">")) => Some(">>"),
-        ("-", Some(">")) => Some("->"),
-        (":", Some(":")) => Some("::"),
+        ("=", Some("=")) if contiguous12 => Some("=="),
+        ("!", Some("=")) if contiguous12 => Some("!="),
+        ("<", Some("=")) if contiguous12 => Some("<="),
+        (">", Some("=")) if contiguous12 => Some(">="),
+        ("+", Some("+")) if contiguous12 => Some("++"),
+        ("-", Some("-")) if contiguous12 => Some("--"),
+        ("&", Some("&")) if contiguous12 => Some("&&"),
+        ("|", Some("|")) if contiguous12 => Some("||"),
+        ("+", Some("=")) if contiguous12 => Some("+="),
+        ("-", Some("=")) if contiguous12 => Some("-="),
+        ("*", Some("=")) if contiguous12 => Some("*="),
+        ("/", Some("=")) if contiguous12 => Some("/="),
+        ("%", Some("=")) if contiguous12 => Some("%="),
+        ("&", Some("=")) if contiguous12 => Some("&="),
+        ("|", Some("=")) if contiguous12 => Some("|="),
+        ("^", Some("=")) if contiguous12 => Some("^="),
+        ("<", Some("<")) if contiguous12 => Some("<<"),
+        (">", Some(">")) if contiguous12 => Some(">>"),
+        ("-", Some(">")) if contiguous12 => Some("->"),
+        (":", Some(":")) if contiguous12 => Some("::"),
         _ => None,
     };
     if let Some(op) = combined2 {
@@ -595,7 +647,10 @@ fn needs_space_before(prev_text: &Option<String>, curr_text: &str, at_line_start
         return false;
     };
 
-    if matches!(prev.as_str(), "(" | "[" | "." | "@" | "::" | "<" | "<<") {
+    if matches!(
+        prev.as_str(),
+        "(" | "[" | "." | "@" | "::" | "<" | "<<" | "+" | "-" | "!" | "~"
+    ) {
         return false;
     }
     if matches!(curr_text, ")" | "]" | "." | "," | ";" | "::") {
@@ -610,7 +665,7 @@ fn needs_space_before_open_paren(prev_text: &Option<String>) -> bool {
     };
     matches!(
         prev.as_str(),
-        "if" | "for" | "while" | "switch" | "catch" | "synchronized"
+        "if" | "for" | "while" | "switch" | "catch" | "synchronized" | "try"
     )
 }
 
@@ -636,6 +691,58 @@ fn is_generic_angle(
 
 fn is_word_like_text(text: &str) -> bool {
     text.chars().all(|ch| ch.is_alphanumeric() || ch == '_')
+}
+
+fn is_unary_prefix_context(prev_text: Option<&str>) -> bool {
+    matches!(
+        prev_text,
+        None | Some(
+            "(" | "["
+                | "{"
+                | ","
+                | ";"
+                | ":"
+                | "?"
+                | "="
+                | "+="
+                | "-="
+                | "*="
+                | "/="
+                | "%="
+                | "&="
+                | "|="
+                | "^="
+                | "=="
+                | "!="
+                | "<="
+                | ">="
+                | "&&"
+                | "||"
+                | "+"
+                | "-"
+                | "*"
+                | "/"
+                | "%"
+                | "&"
+                | "|"
+                | "^"
+                | "<"
+                | ">"
+                | "<<"
+                | ">>"
+                | ">>>"
+                | "<<="
+                | ">>="
+                | ">>>="
+                | "!"
+                | "~"
+                | "->"
+                | "return"
+                | "throw"
+                | "yield"
+                | "case"
+        )
+    )
 }
 
 fn write_with_indent(out: &mut String, at_line_start: &mut bool, indent: usize, text: &str) {
@@ -823,5 +930,40 @@ mod tests {
         let printed = print(&ir);
         assert!(printed.text.contains("Runnable r =\n"));
         assert!(printed.text.contains("() -> {\n"));
+    }
+
+    #[test]
+    fn does_not_merge_binary_plus_and_unary_plus_into_increment() {
+        let source = "class A{int f(int x){return -x + +x + ~x;}}";
+        let lexed = lexer::lex(source);
+        let cst = parser::parse(&lexed);
+        let attachments = comments::attach(&cst, &lexed);
+        let ir = ir::build(&cst, attachments);
+        let printed = print(&ir);
+        assert!(printed.text.contains("return -x + +x + ~x;"));
+        assert!(!printed.text.contains("x++"));
+    }
+
+    #[test]
+    fn formats_switch_arrow_labels() {
+        let source = "class A{void f(int x){switch(x){case 1->System.out.println(1);default->{System.out.println(0);}}}}";
+        let lexed = lexer::lex(source);
+        let cst = parser::parse(&lexed);
+        let attachments = comments::attach(&cst, &lexed);
+        let ir = ir::build(&cst, attachments);
+        let printed = print(&ir);
+        assert!(printed.text.contains("case 1 -> System.out.println(1);"));
+        assert!(printed.text.contains("default -> {\n"));
+    }
+
+    #[test]
+    fn formats_try_with_resources_parentheses_spacing() {
+        let source = "class A{void f(){try(var in=new java.io.ByteArrayInputStream(new byte[0])){in.read();}catch(java.io.IOException e){throw new RuntimeException(e);}}}";
+        let lexed = lexer::lex(source);
+        let cst = parser::parse(&lexed);
+        let attachments = comments::attach(&cst, &lexed);
+        let ir = ir::build(&cst, attachments);
+        let printed = print(&ir);
+        assert!(printed.text.contains("try (var in ="));
     }
 }

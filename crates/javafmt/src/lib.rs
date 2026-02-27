@@ -12,16 +12,46 @@ pub struct FormatResult {
     pub changed: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LineEnding {
+    Lf,
+    Crlf,
+}
+
 pub fn format_str(input: &str) -> FormatResult {
+    let line_ending = detect_line_ending(input);
     let normalized = normalize_newlines(input);
     let lexed = lexer::lex(&normalized);
     let cst = parser::parse(&lexed);
     let attachments = comments::attach(&cst, &lexed);
     let format_ir = ir::build(&cst, attachments);
     let printed = printer::print(&format_ir);
-    let output = emit::emit(printed);
+    let output = apply_line_ending_policy(emit::emit(printed), line_ending);
     let changed = output != input;
     FormatResult { output, changed }
+}
+
+fn detect_line_ending(input: &str) -> LineEnding {
+    if input.contains("\r\n") {
+        LineEnding::Crlf
+    } else {
+        LineEnding::Lf
+    }
+}
+
+fn apply_line_ending_policy(input: String, line_ending: LineEnding) -> String {
+    if line_ending == LineEnding::Lf || !input.contains('\n') {
+        return input;
+    }
+
+    let mut out = String::with_capacity(input.len() + input.matches('\n').count());
+    for ch in input.chars() {
+        if ch == '\n' {
+            out.push('\r');
+        }
+        out.push(ch);
+    }
+    out
 }
 
 fn normalize_newlines(input: &str) -> String {
@@ -57,11 +87,11 @@ mod tests {
     }
 
     #[test]
-    fn normalizes_crlf() {
+    fn preserves_crlf_if_input_uses_crlf() {
         let input = "class A {}\r\n";
         let result = format_str(input);
-        assert_eq!(result.output, "class A {}\n");
-        assert!(result.changed);
+        assert_eq!(result.output, "class A {}\r\n");
+        assert!(!result.changed);
     }
 
     #[test]
