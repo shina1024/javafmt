@@ -6,6 +6,6 @@ pub struct PrintedDoc<'a> {
 }
 
 pub fn print<'a>(ir: &FormatIr<'a>) -> PrintedDoc<'a> {
-    let _ = ir.token_count + ir.line_comment_count;
+    let _ = ir.token_count + ir.line_comment_count + ir.block_comment_count;
     PrintedDoc { text: ir.source }
 }
