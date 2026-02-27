@@ -25,10 +25,7 @@ fn is_supported_subset(ir: &FormatIr<'_>) -> bool {
 
     for token in &ir.tokens {
         match token.kind {
-            TokenKind::LineComment
-            | TokenKind::BlockComment
-            | TokenKind::StringLiteral
-            | TokenKind::CharLiteral => return false,
+            TokenKind::LineComment | TokenKind::BlockComment => return false,
             TokenKind::Symbol => {
                 let symbol = token_text(ir.source, token);
                 if !matches!(
@@ -279,5 +276,19 @@ mod tests {
         let ir = ir::build(&cst, attachments);
         let printed = print(&ir);
         assert_eq!(printed.text, source);
+    }
+
+    #[test]
+    fn formats_string_and_char_literals() {
+        let source = "class A{String s=\"x\";char c='y';}";
+        let lexed = lexer::lex(source);
+        let cst = parser::parse(&lexed);
+        let attachments = comments::attach(&cst, &lexed);
+        let ir = ir::build(&cst, attachments);
+        let printed = print(&ir);
+        assert_eq!(
+            printed.text,
+            "class A {\n  String s = \"x\";\n  char c = 'y';\n}\n"
+        );
     }
 }
