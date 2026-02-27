@@ -1,16 +1,16 @@
-use crate::lexer::LexedSource;
+use crate::lexer::{LexedSource, Token};
 
 #[derive(Debug, Clone)]
 pub struct Cst<'a> {
     pub source: &'a str,
-    pub token_count: usize,
+    pub tokens: Vec<Token>,
 }
 
 impl<'a> Cst<'a> {
     pub fn from_lexed(lexed: &LexedSource<'a>) -> Self {
         Self {
             source: lexed.source,
-            token_count: lexed.tokens.len(),
+            tokens: lexed.tokens.clone(),
         }
     }
 }

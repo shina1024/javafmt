@@ -8,7 +8,7 @@ pub struct CommentAttachment {
 }
 
 pub fn attach(cst: &Cst<'_>, lexed: &LexedSource<'_>) -> CommentAttachment {
-    let _ = cst.token_count;
+    let _ = cst.tokens.len();
     let mut line_comment_count = 0;
     let mut block_comment_count = 0;
     for token in &lexed.tokens {

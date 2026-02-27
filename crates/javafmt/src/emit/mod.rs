@@ -1,7 +1,7 @@
 use crate::printer::PrintedDoc;
 
-pub fn emit(doc: PrintedDoc<'_>) -> String {
-    let normalized = trim_trailing_whitespace(doc.text);
+pub fn emit(doc: PrintedDoc) -> String {
+    let normalized = trim_trailing_whitespace(&doc.text);
     if normalized.is_empty() {
         return String::new();
     }
