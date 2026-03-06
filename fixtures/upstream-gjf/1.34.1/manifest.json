@@ -1,0 +1,1089 @@
+{
+    "suites":  [
+                   {
+                       "cases":  [
+                                     {
+                                         "input":  "testdata/A.input",
+                                         "name":  "A",
+                                         "expected_output":  "testdata/A.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B.input",
+                                         "name":  "B",
+                                         "expected_output":  "testdata/B.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B112853497.input",
+                                         "name":  "B112853497",
+                                         "expected_output":  "testdata/B112853497.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B124394008.input",
+                                         "name":  "B124394008",
+                                         "expected_output":  "testdata/B124394008.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B126411718.input",
+                                         "name":  "B126411718",
+                                         "expected_output":  "testdata/B126411718.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B142553964.input",
+                                         "name":  "B142553964",
+                                         "expected_output":  "testdata/B142553964.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B154342628.input",
+                                         "name":  "B154342628",
+                                         "expected_output":  "testdata/B154342628.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B173808510.input",
+                                         "name":  "B173808510",
+                                         "expected_output":  "testdata/B173808510.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B183431894.input",
+                                         "name":  "B183431894",
+                                         "expected_output":  "testdata/B183431894.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B18479811.input",
+                                         "name":  "B18479811",
+                                         "expected_output":  "testdata/B18479811.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B19950219.input",
+                                         "name":  "B19950219",
+                                         "expected_output":  "testdata/B19950219.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B19950468.input",
+                                         "name":  "B19950468",
+                                         "expected_output":  "testdata/B19950468.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B19950815.input",
+                                         "name":  "B19950815",
+                                         "expected_output":  "testdata/B19950815.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B19996259.input",
+                                         "name":  "B19996259",
+                                         "expected_output":  "testdata/B19996259.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B20128174.input",
+                                         "name":  "B20128174",
+                                         "expected_output":  "testdata/B20128174.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B20128588.input",
+                                         "name":  "B20128588",
+                                         "expected_output":  "testdata/B20128588.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B20128760.input",
+                                         "name":  "B20128760",
+                                         "expected_output":  "testdata/B20128760.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B20128921.input",
+                                         "name":  "B20128921",
+                                         "expected_output":  "testdata/B20128921.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B20341001.input",
+                                         "name":  "B20341001",
+                                         "expected_output":  "testdata/B20341001.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B20524742.input",
+                                         "name":  "B20524742",
+                                         "expected_output":  "testdata/B20524742.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B20529113.input",
+                                         "name":  "B20529113",
+                                         "expected_output":  "testdata/B20529113.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B20531711.input",
+                                         "name":  "B20531711",
+                                         "expected_output":  "testdata/B20531711.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B20535125.input",
+                                         "name":  "B20535125",
+                                         "expected_output":  "testdata/B20535125.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B20567842.input",
+                                         "name":  "B20567842",
+                                         "expected_output":  "testdata/B20567842.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B20569245.input",
+                                         "name":  "B20569245",
+                                         "expected_output":  "testdata/B20569245.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B20577626.input",
+                                         "name":  "B20577626",
+                                         "expected_output":  "testdata/B20577626.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B20578077.input",
+                                         "name":  "B20578077",
+                                         "expected_output":  "testdata/B20578077.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B20580212.input",
+                                         "name":  "B20580212",
+                                         "expected_output":  "testdata/B20580212.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B20701054.input",
+                                         "name":  "B20701054",
+                                         "expected_output":  "testdata/B20701054.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B20844369.input",
+                                         "name":  "B20844369",
+                                         "expected_output":  "testdata/B20844369.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B20915776.input",
+                                         "name":  "B20915776",
+                                         "expected_output":  "testdata/B20915776.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B21031147.input",
+                                         "name":  "B21031147",
+                                         "expected_output":  "testdata/B21031147.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B21105569.input",
+                                         "name":  "B21105569",
+                                         "expected_output":  "testdata/B21105569.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B21185365.input",
+                                         "name":  "B21185365",
+                                         "expected_output":  "testdata/B21185365.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B21192435.input",
+                                         "name":  "B21192435",
+                                         "expected_output":  "testdata/B21192435.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B21278211.input",
+                                         "name":  "B21278211",
+                                         "expected_output":  "testdata/B21278211.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B21283374.input",
+                                         "name":  "B21283374",
+                                         "expected_output":  "testdata/B21283374.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B21305044.input",
+                                         "name":  "B21305044",
+                                         "expected_output":  "testdata/B21305044.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B21327412.input",
+                                         "name":  "B21327412",
+                                         "expected_output":  "testdata/B21327412.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B21329312.input",
+                                         "name":  "B21329312",
+                                         "expected_output":  "testdata/B21329312.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B21331232.input",
+                                         "name":  "B21331232",
+                                         "expected_output":  "testdata/B21331232.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B21465217.input",
+                                         "name":  "B21465217",
+                                         "expected_output":  "testdata/B21465217.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B21465477.input",
+                                         "name":  "B21465477",
+                                         "expected_output":  "testdata/B21465477.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B21585653.input",
+                                         "name":  "B21585653",
+                                         "expected_output":  "testdata/B21585653.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B21608216.input",
+                                         "name":  "B21608216",
+                                         "expected_output":  "testdata/B21608216.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B21647014.input",
+                                         "name":  "B21647014",
+                                         "expected_output":  "testdata/B21647014.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B21954779.input",
+                                         "name":  "B21954779",
+                                         "expected_output":  "testdata/B21954779.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B22166687.input",
+                                         "name":  "B22166687",
+                                         "expected_output":  "testdata/B22166687.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B22169269.input",
+                                         "name":  "B22169269",
+                                         "expected_output":  "testdata/B22169269.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B22424362.input",
+                                         "name":  "B22424362",
+                                         "expected_output":  "testdata/B22424362.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B22469536.input",
+                                         "name":  "B22469536",
+                                         "expected_output":  "testdata/B22469536.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B22488373.input",
+                                         "name":  "B22488373",
+                                         "expected_output":  "testdata/B22488373.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B22610221.input",
+                                         "name":  "B22610221",
+                                         "expected_output":  "testdata/B22610221.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B22815364.input",
+                                         "name":  "B22815364",
+                                         "expected_output":  "testdata/B22815364.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B22848286.input",
+                                         "name":  "B22848286",
+                                         "expected_output":  "testdata/B22848286.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B22873322.input",
+                                         "name":  "B22873322",
+                                         "expected_output":  "testdata/B22873322.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B22913048.input",
+                                         "name":  "B22913048",
+                                         "expected_output":  "testdata/B22913048.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B23349153.input",
+                                         "name":  "B23349153",
+                                         "expected_output":  "testdata/B23349153.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B23514513.input",
+                                         "name":  "B23514513",
+                                         "expected_output":  "testdata/B23514513.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B23626035.input",
+                                         "name":  "B23626035",
+                                         "expected_output":  "testdata/B23626035.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B23708487.input",
+                                         "name":  "B23708487",
+                                         "expected_output":  "testdata/B23708487.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B23749160.input",
+                                         "name":  "B23749160",
+                                         "expected_output":  "testdata/B23749160.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B23804934.input",
+                                         "name":  "B23804934",
+                                         "expected_output":  "testdata/B23804934.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B24202287.input",
+                                         "name":  "B24202287",
+                                         "expected_output":  "testdata/B24202287.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B24494875.input",
+                                         "name":  "B24494875",
+                                         "expected_output":  "testdata/B24494875.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B24543625.input",
+                                         "name":  "B24543625",
+                                         "expected_output":  "testdata/B24543625.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B24702438.input",
+                                         "name":  "B24702438",
+                                         "expected_output":  "testdata/B24702438.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B24862959.input",
+                                         "name":  "B24862959",
+                                         "expected_output":  "testdata/B24862959.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B24909927.input",
+                                         "name":  "B24909927",
+                                         "expected_output":  "testdata/B24909927.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B24988078.input",
+                                         "name":  "B24988078",
+                                         "expected_output":  "testdata/B24988078.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B25372815.input",
+                                         "name":  "B25372815",
+                                         "expected_output":  "testdata/B25372815.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B25749989.input",
+                                         "name":  "B25749989",
+                                         "expected_output":  "testdata/B25749989.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B25787055.input",
+                                         "name":  "B25787055",
+                                         "expected_output":  "testdata/B25787055.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B25811323.input",
+                                         "name":  "B25811323",
+                                         "expected_output":  "testdata/B25811323.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B26159561.input",
+                                         "name":  "B26159561",
+                                         "expected_output":  "testdata/B26159561.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B26207047.input",
+                                         "name":  "B26207047",
+                                         "expected_output":  "testdata/B26207047.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B26275739.input",
+                                         "name":  "B26275739",
+                                         "expected_output":  "testdata/B26275739.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B26293162.input",
+                                         "name":  "B26293162",
+                                         "expected_output":  "testdata/B26293162.output"
+                                     },
+                                     {
+                                         "input":  "testdata/b26306390.input",
+                                         "name":  "b26306390",
+                                         "expected_output":  "testdata/b26306390.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B26694550.input",
+                                         "name":  "B26694550",
+                                         "expected_output":  "testdata/B26694550.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B26884608.input",
+                                         "name":  "B26884608",
+                                         "expected_output":  "testdata/B26884608.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B26928842.input",
+                                         "name":  "B26928842",
+                                         "expected_output":  "testdata/B26928842.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B26952926.input",
+                                         "name":  "B26952926",
+                                         "expected_output":  "testdata/B26952926.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B27078833.input",
+                                         "name":  "B27078833",
+                                         "expected_output":  "testdata/B27078833.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B27246427.input",
+                                         "name":  "B27246427",
+                                         "expected_output":  "testdata/B27246427.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B27602933.input",
+                                         "name":  "B27602933",
+                                         "expected_output":  "testdata/B27602933.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B28066276.input",
+                                         "name":  "B28066276",
+                                         "expected_output":  "testdata/B28066276.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B28774859.input",
+                                         "name":  "B28774859",
+                                         "expected_output":  "testdata/B28774859.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B28786284.input",
+                                         "name":  "B28786284",
+                                         "expected_output":  "testdata/B28786284.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B29368546.input",
+                                         "name":  "B29368546",
+                                         "expected_output":  "testdata/B29368546.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B29618429.input",
+                                         "name":  "B29618429",
+                                         "expected_output":  "testdata/B29618429.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B29705613.input",
+                                         "name":  "B29705613",
+                                         "expected_output":  "testdata/B29705613.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B30153869.input",
+                                         "name":  "B30153869",
+                                         "expected_output":  "testdata/B30153869.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B30223986.input",
+                                         "name":  "B30223986",
+                                         "expected_output":  "testdata/B30223986.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B30764810.input",
+                                         "name":  "B30764810",
+                                         "expected_output":  "testdata/B30764810.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B30789352.input",
+                                         "name":  "B30789352",
+                                         "expected_output":  "testdata/B30789352.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B308157568.input",
+                                         "name":  "B308157568",
+                                         "expected_output":  "testdata/B308157568.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B32114928.input",
+                                         "name":  "B32114928",
+                                         "expected_output":  "testdata/B32114928.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B322210626.input",
+                                         "name":  "B322210626",
+                                         "expected_output":  "testdata/B322210626.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B32284705.input",
+                                         "name":  "B32284705",
+                                         "expected_output":  "testdata/B32284705.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B32397217.input",
+                                         "name":  "B32397217",
+                                         "expected_output":  "testdata/B32397217.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B32729600.input",
+                                         "name":  "B32729600",
+                                         "expected_output":  "testdata/B32729600.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B33358723.input",
+                                         "name":  "B33358723",
+                                         "expected_output":  "testdata/B33358723.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B35644813.input",
+                                         "name":  "B35644813",
+                                         "expected_output":  "testdata/B35644813.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B35797074.input",
+                                         "name":  "B35797074",
+                                         "expected_output":  "testdata/B35797074.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B361077825.input",
+                                         "name":  "B361077825",
+                                         "expected_output":  "testdata/B361077825.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B36194204.input",
+                                         "name":  "B36194204",
+                                         "expected_output":  "testdata/B36194204.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B37629610.input",
+                                         "name":  "B37629610",
+                                         "expected_output":  "testdata/B37629610.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B377585941.input",
+                                         "name":  "B377585941",
+                                         "expected_output":  "testdata/B377585941.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B37895033.input",
+                                         "name":  "B37895033",
+                                         "expected_output":  "testdata/B37895033.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B380299722.input",
+                                         "name":  "B380299722",
+                                         "expected_output":  "testdata/B380299722.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B381242320.input",
+                                         "name":  "B381242320",
+                                         "expected_output":  "testdata/B381242320.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B38203081.input",
+                                         "name":  "B38203081",
+                                         "expected_output":  "testdata/B38203081.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B38241237.input",
+                                         "name":  "B38241237",
+                                         "expected_output":  "testdata/B38241237.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B38352414.input",
+                                         "name":  "B38352414",
+                                         "expected_output":  "testdata/B38352414.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B64493529.input",
+                                         "name":  "B64493529",
+                                         "expected_output":  "testdata/B64493529.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B65214682.input",
+                                         "name":  "B65214682",
+                                         "expected_output":  "testdata/B65214682.output"
+                                     },
+                                     {
+                                         "input":  "testdata/B72507902.input",
+                                         "name":  "B72507902",
+                                         "expected_output":  "testdata/B72507902.output"
+                                     },
+                                     {
+                                         "input":  "testdata/C.input",
+                                         "name":  "C",
+                                         "expected_output":  "testdata/C.output"
+                                     },
+                                     {
+                                         "input":  "testdata/D.input",
+                                         "name":  "D",
+                                         "expected_output":  "testdata/D.output"
+                                     },
+                                     {
+                                         "input":  "testdata/E.input",
+                                         "name":  "E",
+                                         "expected_output":  "testdata/E.output"
+                                     },
+                                     {
+                                         "input":  "testdata/EnumAnnotation.input",
+                                         "name":  "EnumAnnotation",
+                                         "expected_output":  "testdata/EnumAnnotation.output"
+                                     },
+                                     {
+                                         "input":  "testdata/ExpressionSwitch.input",
+                                         "name":  "ExpressionSwitch",
+                                         "expected_output":  "testdata/ExpressionSwitch.output"
+                                     },
+                                     {
+                                         "input":  "testdata/F.input",
+                                         "name":  "F",
+                                         "expected_output":  "testdata/F.output"
+                                     },
+                                     {
+                                         "input":  "testdata/Fields.input",
+                                         "name":  "Fields",
+                                         "expected_output":  "testdata/Fields.output"
+                                     },
+                                     {
+                                         "input":  "testdata/ForMany.input",
+                                         "name":  "ForMany",
+                                         "expected_output":  "testdata/ForMany.output"
+                                     },
+                                     {
+                                         "input":  "testdata/I.input",
+                                         "name":  "I",
+                                         "expected_output":  "testdata/I.output"
+                                     },
+                                     {
+                                         "input":  "testdata/I1.input",
+                                         "name":  "I1",
+                                         "expected_output":  "testdata/I1.output"
+                                     },
+                                     {
+                                         "input":  "testdata/i100.input",
+                                         "name":  "i100",
+                                         "expected_output":  "testdata/i100.output"
+                                     },
+                                     {
+                                         "input":  "testdata/i101.input",
+                                         "name":  "i101",
+                                         "expected_output":  "testdata/i101.output"
+                                     },
+                                     {
+                                         "input":  "testdata/I1020.input",
+                                         "name":  "I1020",
+                                         "expected_output":  "testdata/I1020.output"
+                                     },
+                                     {
+                                         "input":  "testdata/I1037.input",
+                                         "name":  "I1037",
+                                         "expected_output":  "testdata/I1037.output"
+                                     },
+                                     {
+                                         "input":  "testdata/I1153.input",
+                                         "name":  "I1153",
+                                         "expected_output":  "testdata/I1153.output"
+                                     },
+                                     {
+                                         "input":  "testdata/I12.input",
+                                         "name":  "I12",
+                                         "expected_output":  "testdata/I12.output"
+                                     },
+                                     {
+                                         "input":  "testdata/I1205.input",
+                                         "name":  "I1205",
+                                         "expected_output":  "testdata/I1205.output"
+                                     },
+                                     {
+                                         "input":  "testdata/I13.input",
+                                         "name":  "I13",
+                                         "expected_output":  "testdata/I13.output"
+                                     },
+                                     {
+                                         "input":  "testdata/i155.input",
+                                         "name":  "i155",
+                                         "expected_output":  "testdata/i155.output"
+                                     },
+                                     {
+                                         "input":  "testdata/i176.input",
+                                         "name":  "i176",
+                                         "expected_output":  "testdata/i176.output"
+                                     },
+                                     {
+                                         "input":  "testdata/I202.input",
+                                         "name":  "I202",
+                                         "expected_output":  "testdata/I202.output"
+                                     },
+                                     {
+                                         "input":  "testdata/i221.input",
+                                         "name":  "i221",
+                                         "expected_output":  "testdata/i221.output"
+                                     },
+                                     {
+                                         "input":  "testdata/i281.input",
+                                         "name":  "i281",
+                                         "expected_output":  "testdata/i281.output"
+                                     },
+                                     {
+                                         "input":  "testdata/i282.input",
+                                         "name":  "i282",
+                                         "expected_output":  "testdata/i282.output"
+                                     },
+                                     {
+                                         "input":  "testdata/I365.input",
+                                         "name":  "I365",
+                                         "expected_output":  "testdata/I365.output"
+                                     },
+                                     {
+                                         "input":  "testdata/I374.input",
+                                         "name":  "I374",
+                                         "expected_output":  "testdata/I374.output"
+                                     },
+                                     {
+                                         "input":  "testdata/I477.input",
+                                         "name":  "I477",
+                                         "expected_output":  "testdata/I477.output"
+                                     },
+                                     {
+                                         "input":  "testdata/i55.input",
+                                         "name":  "i55",
+                                         "expected_output":  "testdata/i55.output"
+                                     },
+                                     {
+                                         "input":  "testdata/I574.input",
+                                         "name":  "I574",
+                                         "expected_output":  "testdata/I574.output"
+                                     },
+                                     {
+                                         "input":  "testdata/I588.input",
+                                         "name":  "I588",
+                                         "expected_output":  "testdata/I588.output"
+                                     },
+                                     {
+                                         "input":  "testdata/i59.input",
+                                         "name":  "i59",
+                                         "expected_output":  "testdata/i59.output"
+                                     },
+                                     {
+                                         "input":  "testdata/I594.input",
+                                         "name":  "I594",
+                                         "expected_output":  "testdata/I594.output"
+                                     },
+                                     {
+                                         "input":  "testdata/i60.input",
+                                         "name":  "i60",
+                                         "expected_output":  "testdata/i60.output"
+                                     },
+                                     {
+                                         "input":  "testdata/I603.input",
+                                         "name":  "I603",
+                                         "expected_output":  "testdata/I603.output"
+                                     },
+                                     {
+                                         "input":  "testdata/I643.input",
+                                         "name":  "I643",
+                                         "expected_output":  "testdata/I643.output"
+                                     },
+                                     {
+                                         "input":  "testdata/i65.input",
+                                         "name":  "i65",
+                                         "expected_output":  "testdata/i65.output"
+                                     },
+                                     {
+                                         "input":  "testdata/i66.input",
+                                         "name":  "i66",
+                                         "expected_output":  "testdata/i66.output"
+                                     },
+                                     {
+                                         "input":  "testdata/I683.input",
+                                         "name":  "I683",
+                                         "expected_output":  "testdata/I683.output"
+                                     },
+                                     {
+                                         "input":  "testdata/I684.input",
+                                         "name":  "I684",
+                                         "expected_output":  "testdata/I684.output"
+                                     },
+                                     {
+                                         "input":  "testdata/I696.input",
+                                         "name":  "I696",
+                                         "expected_output":  "testdata/I696.output"
+                                     },
+                                     {
+                                         "input":  "testdata/i71.input",
+                                         "name":  "i71",
+                                         "expected_output":  "testdata/i71.output"
+                                     },
+                                     {
+                                         "input":  "testdata/I880.input",
+                                         "name":  "I880",
+                                         "expected_output":  "testdata/I880.output"
+                                     },
+                                     {
+                                         "input":  "testdata/i95.input",
+                                         "name":  "i95",
+                                         "expected_output":  "testdata/i95.output"
+                                     },
+                                     {
+                                         "input":  "testdata/I959.input",
+                                         "name":  "I959",
+                                         "expected_output":  "testdata/I959.output"
+                                     },
+                                     {
+                                         "input":  "testdata/i98.input",
+                                         "name":  "i98",
+                                         "expected_output":  "testdata/i98.output"
+                                     },
+                                     {
+                                         "input":  "testdata/InstanceMain.input",
+                                         "name":  "InstanceMain",
+                                         "expected_output":  "testdata/InstanceMain.output"
+                                     },
+                                     {
+                                         "input":  "testdata/java11.input",
+                                         "name":  "java11",
+                                         "expected_output":  "testdata/java11.output"
+                                     },
+                                     {
+                                         "input":  "testdata/L.input",
+                                         "name":  "L",
+                                         "expected_output":  "testdata/L.output"
+                                     },
+                                     {
+                                         "input":  "testdata/LegacySwitchComment.input",
+                                         "name":  "LegacySwitchComment",
+                                         "expected_output":  "testdata/LegacySwitchComment.output"
+                                     },
+                                     {
+                                         "input":  "testdata/LiteralReflow.input",
+                                         "name":  "LiteralReflow",
+                                         "expected_output":  "testdata/LiteralReflow.output"
+                                     },
+                                     {
+                                         "input":  "testdata/LocalAnnotations.input",
+                                         "name":  "LocalAnnotations",
+                                         "expected_output":  "testdata/LocalAnnotations.output"
+                                     },
+                                     {
+                                         "input":  "testdata/M.input",
+                                         "name":  "M",
+                                         "expected_output":  "testdata/M.output"
+                                     },
+                                     {
+                                         "input":  "testdata/M1.input",
+                                         "name":  "M1",
+                                         "expected_output":  "testdata/M1.output"
+                                     },
+                                     {
+                                         "input":  "testdata/M2.input",
+                                         "name":  "M2",
+                                         "expected_output":  "testdata/M2.output"
+                                     },
+                                     {
+                                         "input":  "testdata/M3.input",
+                                         "name":  "M3",
+                                         "expected_output":  "testdata/M3.output"
+                                     },
+                                     {
+                                         "input":  "testdata/MarkerAnnotation.input",
+                                         "name":  "MarkerAnnotation",
+                                         "expected_output":  "testdata/MarkerAnnotation.output"
+                                     },
+                                     {
+                                         "input":  "testdata/Multivariables.input",
+                                         "name":  "Multivariables",
+                                         "expected_output":  "testdata/Multivariables.output"
+                                     },
+                                     {
+                                         "input":  "testdata/N.input",
+                                         "name":  "N",
+                                         "expected_output":  "testdata/N.output"
+                                     },
+                                     {
+                                         "input":  "testdata/NormalAnnotation.input",
+                                         "name":  "NormalAnnotation",
+                                         "expected_output":  "testdata/NormalAnnotation.output"
+                                     },
+                                     {
+                                         "input":  "testdata/P.input",
+                                         "name":  "P",
+                                         "expected_output":  "testdata/P.output"
+                                     },
+                                     {
+                                         "input":  "testdata/Pair.input",
+                                         "name":  "Pair",
+                                         "expected_output":  "testdata/Pair.output"
+                                     },
+                                     {
+                                         "input":  "testdata/PairedArguments.input",
+                                         "name":  "PairedArguments",
+                                         "expected_output":  "testdata/PairedArguments.output"
+                                     },
+                                     {
+                                         "input":  "testdata/ParameterComment.input",
+                                         "name":  "ParameterComment",
+                                         "expected_output":  "testdata/ParameterComment.output"
+                                     },
+                                     {
+                                         "input":  "testdata/Q.input",
+                                         "name":  "Q",
+                                         "expected_output":  "testdata/Q.output"
+                                     },
+                                     {
+                                         "input":  "testdata/R.input",
+                                         "name":  "R",
+                                         "expected_output":  "testdata/R.output"
+                                     },
+                                     {
+                                         "input":  "testdata/Records.input",
+                                         "name":  "Records",
+                                         "expected_output":  "testdata/Records.output"
+                                     },
+                                     {
+                                         "input":  "testdata/RSLs.input",
+                                         "name":  "RSLs",
+                                         "expected_output":  "testdata/RSLs.output"
+                                     },
+                                     {
+                                         "input":  "testdata/S.input",
+                                         "name":  "S",
+                                         "expected_output":  "testdata/S.output"
+                                     },
+                                     {
+                                         "input":  "testdata/Sealed.input",
+                                         "name":  "Sealed",
+                                         "expected_output":  "testdata/Sealed.output"
+                                     },
+                                     {
+                                         "input":  "testdata/SemicolonInClass.input",
+                                         "name":  "SemicolonInClass",
+                                         "expected_output":  "testdata/SemicolonInClass.output"
+                                     },
+                                     {
+                                         "input":  "testdata/SingleMemberAnnotation.input",
+                                         "name":  "SingleMemberAnnotation",
+                                         "expected_output":  "testdata/SingleMemberAnnotation.output"
+                                     },
+                                     {
+                                         "input":  "testdata/SuperQualifier.input",
+                                         "name":  "SuperQualifier",
+                                         "expected_output":  "testdata/SuperQualifier.output"
+                                     },
+                                     {
+                                         "input":  "testdata/SwitchComment.input",
+                                         "name":  "SwitchComment",
+                                         "expected_output":  "testdata/SwitchComment.output"
+                                     },
+                                     {
+                                         "input":  "testdata/SwitchDouble.input",
+                                         "name":  "SwitchDouble",
+                                         "expected_output":  "testdata/SwitchDouble.output"
+                                     },
+                                     {
+                                         "input":  "testdata/SwitchGuardClause.input",
+                                         "name":  "SwitchGuardClause",
+                                         "expected_output":  "testdata/SwitchGuardClause.output"
+                                     },
+                                     {
+                                         "input":  "testdata/SwitchRecord.input",
+                                         "name":  "SwitchRecord",
+                                         "expected_output":  "testdata/SwitchRecord.output"
+                                     },
+                                     {
+                                         "input":  "testdata/SwitchUnderscore.input",
+                                         "name":  "SwitchUnderscore",
+                                         "expected_output":  "testdata/SwitchUnderscore.output"
+                                     },
+                                     {
+                                         "input":  "testdata/T.input",
+                                         "name":  "T",
+                                         "expected_output":  "testdata/T.output"
+                                     },
+                                     {
+                                         "input":  "testdata/TabularMixedSignInitializer.input",
+                                         "name":  "TabularMixedSignInitializer",
+                                         "expected_output":  "testdata/TabularMixedSignInitializer.output"
+                                     },
+                                     {
+                                         "input":  "testdata/TryWithResources.input",
+                                         "name":  "TryWithResources",
+                                         "expected_output":  "testdata/TryWithResources.output"
+                                     },
+                                     {
+                                         "input":  "testdata/TypeAnnotations.input",
+                                         "name":  "TypeAnnotations",
+                                         "expected_output":  "testdata/TypeAnnotations.output"
+                                     },
+                                     {
+                                         "input":  "testdata/U.input",
+                                         "name":  "U",
+                                         "expected_output":  "testdata/U.output"
+                                     },
+                                     {
+                                         "input":  "testdata/UnaryMinus.input",
+                                         "name":  "UnaryMinus",
+                                         "expected_output":  "testdata/UnaryMinus.output"
+                                     },
+                                     {
+                                         "input":  "testdata/Unformatted.input",
+                                         "name":  "Unformatted",
+                                         "expected_output":  "testdata/Unformatted.output"
+                                     },
+                                     {
+                                         "input":  "testdata/Unformatted2.input",
+                                         "name":  "Unformatted2",
+                                         "expected_output":  "testdata/Unformatted2.output"
+                                     },
+                                     {
+                                         "input":  "testdata/Unformatted3.input",
+                                         "name":  "Unformatted3",
+                                         "expected_output":  "testdata/Unformatted3.output"
+                                     },
+                                     {
+                                         "input":  "testdata/Unnamed.input",
+                                         "name":  "Unnamed",
+                                         "expected_output":  "testdata/Unnamed.output"
+                                     },
+                                     {
+                                         "input":  "testdata/V.input",
+                                         "name":  "V",
+                                         "expected_output":  "testdata/V.output"
+                                     },
+                                     {
+                                         "input":  "testdata/Var.input",
+                                         "name":  "Var",
+                                         "expected_output":  "testdata/Var.output"
+                                     },
+                                     {
+                                         "input":  "testdata/W.input",
+                                         "name":  "W",
+                                         "expected_output":  "testdata/W.output"
+                                     },
+                                     {
+                                         "input":  "testdata/WildBound.input",
+                                         "name":  "WildBound",
+                                         "expected_output":  "testdata/WildBound.output"
+                                     }
+                                 ],
+                       "note":  "FormatterIntegrationTest full-file formatting corpus from pinned upstream tag.",
+                       "id":  "testdata",
+                       "kind":  "full_format"
+                   },
+                   {
+                       "cases":  [
+                                     {
+                                         "input":  "testjavadoc/B28750242.input",
+                                         "name":  "B28750242",
+                                         "expected_output":  "testjavadoc/B28750242.output"
+                                     },
+                                     {
+                                         "input":  "testjavadoc/B31404367.input",
+                                         "name":  "B31404367",
+                                         "expected_output":  "testjavadoc/B31404367.output"
+                                     }
+                                 ],
+                       "note":  "JavadocFormattingTest corpus from pinned upstream tag.",
+                       "id":  "testjavadoc",
+                       "kind":  "full_format"
+                   },
+                   {
+                       "note":  "Upstream import-order/import-mode assets are vendored for future dedicated runners.",
+                       "id":  "testimports",
+                       "assets":  [
+                                      "testimports/A.formatting-and-import-sorting",
+                                      "testimports/A.formatting-and-unused-import-removal",
+                                      "testimports/A.formatting-only",
+                                      "testimports/A.imports-and-formatting",
+                                      "testimports/A.imports-only",
+                                      "testimports/A.input"
+                                  ],
+                       "kind":  "asset_only"
+                   }
+               ],
+    "version":  "1.34.1",
+    "tag":  "v1.34.1",
+    "repository":  "google/google-java-format"
+}

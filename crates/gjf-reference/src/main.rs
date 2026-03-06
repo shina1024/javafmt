@@ -1,3 +1,5 @@
+mod suite;
+
 use clap::Parser;
 use javafmt::format_str;
 use serde::Serialize;
@@ -7,6 +9,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
 use std::time::Instant;
+use suite::{SuiteReport, run_suite};
 
 #[derive(Debug, Parser)]
 #[command(name = "gjf-reference")]
@@ -14,6 +17,8 @@ use std::time::Instant;
 struct Cli {
     #[arg(long, help = "Path to google-java-format jar file")]
     gjf_jar: Option<PathBuf>,
+    #[arg(long, help = "Path to vendored upstream suite manifest")]
+    suite_manifest: Option<PathBuf>,
     #[arg(
         long,
         help = "Write JSON report (checked files, mismatch count, mismatch files)"
@@ -32,7 +37,10 @@ struct Cli {
         help = "Fail when (GJF elapsed / javafmt elapsed) is below this value"
     )]
     min_gjf_over_javafmt: Option<f64>,
-    #[arg(required = true)]
+    #[arg(long, help = "Fail when suite pass rate is below this value (0.0-1.0)")]
+    min_suite_pass_rate: Option<f64>,
+    #[arg(long, help = "Fail when suite failures exceed this value")]
+    max_suite_failures: Option<usize>,
     inputs: Vec<PathBuf>,
 }
 
@@ -69,6 +77,13 @@ fn main() -> ExitCode {
 
 fn run() -> Result<ExitCode, String> {
     let cli = Cli::parse();
+    if let Some(manifest_path) = &cli.suite_manifest {
+        return run_suite_mode(&cli, manifest_path);
+    }
+
+    if cli.inputs.is_empty() {
+        return Err(String::from("no Java files found in inputs"));
+    }
     if cli.runs == 0 {
         return Err(String::from("--runs must be >= 1"));
     }
@@ -140,7 +155,7 @@ fn run() -> Result<ExitCode, String> {
     );
 
     if let Some(report_path) = cli.report {
-        write_report(&report_path, &report)?;
+        write_json_report(&report_path, &report)?;
         println!("report: {}", report_path.display());
     }
 
@@ -165,6 +180,62 @@ fn run() -> Result<ExitCode, String> {
     Ok(ExitCode::SUCCESS)
 }
 
+fn run_suite_mode(cli: &Cli, manifest_path: &Path) -> Result<ExitCode, String> {
+    if !cli.inputs.is_empty() {
+        return Err(String::from(
+            "positional inputs cannot be combined with --suite-manifest",
+        ));
+    }
+    if cli.gjf_jar.is_some() {
+        return Err(String::from("--gjf-jar is not used with --suite-manifest"));
+    }
+    if cli.runs != 1 {
+        return Err(String::from(
+            "--runs is not supported with --suite-manifest",
+        ));
+    }
+    if cli.min_gjf_over_javafmt.is_some() {
+        return Err(String::from(
+            "--min-gjf-over-javafmt is not supported with --suite-manifest",
+        ));
+    }
+
+    let report = run_suite(manifest_path)?;
+    print_suite_summary(&report);
+
+    if let Some(report_path) = &cli.report {
+        write_json_report(report_path, &report)?;
+        println!("report: {}", report_path.display());
+    }
+
+    if let Some(max_failures) = cli.max_suite_failures
+        && report.failed_cases > max_failures
+    {
+        eprintln!(
+            "gate failed: suite_failed_cases={} > max_suite_failures={}",
+            report.failed_cases, max_failures
+        );
+        return Ok(ExitCode::from(1));
+    }
+
+    if let Some(min_pass_rate) = cli.min_suite_pass_rate {
+        if !(0.0..=1.0).contains(&min_pass_rate) {
+            return Err(String::from(
+                "--min-suite-pass-rate must be between 0.0 and 1.0",
+            ));
+        }
+        if report.pass_rate < min_pass_rate {
+            eprintln!(
+                "gate failed: suite_pass_rate={:.3} < min_suite_pass_rate={:.3}",
+                report.pass_rate, min_pass_rate
+            );
+            return Ok(ExitCode::from(1));
+        }
+    }
+
+    Ok(ExitCode::SUCCESS)
+}
+
 fn load_sources(files: &[PathBuf]) -> Result<Vec<SourceFile>, String> {
     let mut sources = Vec::with_capacity(files.len());
     for file in files {
@@ -178,7 +249,7 @@ fn load_sources(files: &[PathBuf]) -> Result<Vec<SourceFile>, String> {
     Ok(sources)
 }
 
-fn write_report(path: &Path, report: &ComparisonReport) -> Result<(), String> {
+fn write_json_report<T: Serialize>(path: &Path, report: &T) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {
             fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
@@ -186,6 +257,31 @@ fn write_report(path: &Path, report: &ComparisonReport) -> Result<(), String> {
     }
     let json = serde_json::to_string_pretty(report).map_err(|e| format!("json: {e}"))?;
     fs::write(path, json).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+fn print_suite_summary(report: &SuiteReport) {
+    println!(
+        "suite_version={} executable_cases={} passed={} failed={} pending_assets={} pass_rate={:.3} elapsed_us={}",
+        report.version,
+        report.executable_cases,
+        report.passed_cases,
+        report.failed_cases,
+        report.pending_assets,
+        report.pass_rate,
+        report.elapsed_us
+    );
+    for suite in &report.suites {
+        println!(
+            "suite:{} kind={} executable_cases={} passed={} failed={} pending_assets={} pass_rate={:.3}",
+            suite.id,
+            suite.kind,
+            suite.executable_cases,
+            suite.passed_cases,
+            suite.failed_cases,
+            suite.pending_assets,
+            suite.pass_rate
+        );
+    }
 }
 
 fn resolve_gjf_jar(explicit: Option<PathBuf>) -> Result<PathBuf, String> {
