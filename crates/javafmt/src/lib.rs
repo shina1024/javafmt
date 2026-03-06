@@ -1,3 +1,4 @@
+pub mod bench_support;
 pub mod comments;
 pub mod cst;
 pub mod emit;

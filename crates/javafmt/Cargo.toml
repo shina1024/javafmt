@@ -4,3 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+
+[[bench]]
+name = "format_bench"
+harness = false
+path = "../../benches/format_bench.rs"
