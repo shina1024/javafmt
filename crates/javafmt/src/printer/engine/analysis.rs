@@ -150,22 +150,38 @@ pub(super) fn chain_continuation_metrics(
 ) -> Option<ChainContinuationMetrics> {
     let mut local_paren_depth = 0usize;
     let mut local_bracket_depth = 0usize;
+    let mut local_brace_depth = 0usize;
     let mut scanned_chars = 0usize;
     let mut top_level_dot_count = 0usize;
     let mut dot_after_call_count = 0usize;
     let mut keep_leading_dots = 0usize;
     let mut first_top_level_call_dot = 0usize;
     let mut saw_top_level_method_call = false;
+    let mut has_top_level_operator = false;
 
     while index < tokens.len() {
         let token = tokens[index];
         scanned_chars += token.end.saturating_sub(token.start);
+        if token.kind == TokenKind::Word
+            && local_paren_depth == 0
+            && local_bracket_depth == 0
+            && local_brace_depth == 0
+            && matches!(token_text(source, token), "instanceof" | "when")
+        {
+            has_top_level_operator = true;
+        }
         if token.kind == TokenKind::Symbol {
             let (symbol, consumed) = read_symbol(tokens, index, source);
             match symbol {
-                ";" if local_paren_depth == 0 && local_bracket_depth == 0 => break,
+                ";" if local_paren_depth == 0
+                    && local_bracket_depth == 0
+                    && local_brace_depth == 0 =>
+                {
+                    break;
+                }
                 "(" => {
-                    if local_paren_depth == 0 && local_bracket_depth == 0 {
+                    if local_paren_depth == 0 && local_bracket_depth == 0 && local_brace_depth == 0
+                    {
                         saw_top_level_method_call = true;
                     }
                     local_paren_depth += 1;
@@ -173,7 +189,12 @@ pub(super) fn chain_continuation_metrics(
                 ")" => local_paren_depth = local_paren_depth.saturating_sub(1),
                 "[" => local_bracket_depth += 1,
                 "]" => local_bracket_depth = local_bracket_depth.saturating_sub(1),
-                "." if local_paren_depth == 0 && local_bracket_depth == 0 => {
+                "{" => local_brace_depth += 1,
+                "}" => local_brace_depth = local_brace_depth.saturating_sub(1),
+                "." if local_paren_depth == 0
+                    && local_bracket_depth == 0
+                    && local_brace_depth == 0 =>
+                {
                     top_level_dot_count += 1;
                     let member_call_name =
                         next_chain_member_call_name(tokens, index + consumed, source);
@@ -189,6 +210,14 @@ pub(super) fn chain_continuation_metrics(
                     {
                         keep_leading_dots = top_level_dot_count;
                     }
+                }
+                "?" | ":" | "&&" | "||" | "==" | "!=" | "<=" | ">=" | "+" | "-" | "*" | "/"
+                | "%" | "&" | "|" | "^" | "<<" | ">>" | ">>>"
+                    if local_paren_depth == 0
+                        && local_bracket_depth == 0
+                        && local_brace_depth == 0 =>
+                {
+                    has_top_level_operator = true;
                 }
                 _ => {}
             }
@@ -207,7 +236,7 @@ pub(super) fn chain_continuation_metrics(
         keep_leading_dots = 1;
     }
 
-    (dot_after_call_count >= 1 || long_member_chain)
+    (!has_top_level_operator && (dot_after_call_count >= 1 || long_member_chain))
         .then_some(ChainContinuationMetrics { keep_leading_dots })
 }
 
@@ -1118,6 +1147,64 @@ pub(super) fn should_break_before_chained_dot(out: &str) -> bool {
     line.chars().filter(|ch| *ch == '.').count() >= 2
 }
 
+pub(super) fn should_break_array_index_expression(
+    tokens: &[&Token],
+    mut index: usize,
+    source: &str,
+) -> bool {
+    let mut local_paren_depth = 0usize;
+    let mut local_bracket_depth = 0usize;
+    let mut local_brace_depth = 0usize;
+    let mut scanned_chars = 0usize;
+    let mut saw_method_call = false;
+    let mut saw_binary_operator = false;
+
+    while index < tokens.len() {
+        let token = tokens[index];
+        scanned_chars += token.end.saturating_sub(token.start);
+        if matches!(token.kind, TokenKind::LineComment | TokenKind::BlockComment) {
+            return true;
+        }
+        if token.kind == TokenKind::Symbol {
+            let (symbol, consumed) = read_symbol(tokens, index, source);
+            match symbol {
+                "]" if local_paren_depth == 0
+                    && local_bracket_depth == 0
+                    && local_brace_depth == 0 =>
+                {
+                    break;
+                }
+                "(" => {
+                    if local_paren_depth == 0 && local_bracket_depth == 0 && local_brace_depth == 0
+                    {
+                        saw_method_call = true;
+                    }
+                    local_paren_depth += 1;
+                }
+                ")" => local_paren_depth = local_paren_depth.saturating_sub(1),
+                "[" => local_bracket_depth += 1,
+                "]" => local_bracket_depth = local_bracket_depth.saturating_sub(1),
+                "{" => local_brace_depth += 1,
+                "}" => local_brace_depth = local_brace_depth.saturating_sub(1),
+                "?" | ":" | "&&" | "||" | "==" | "!=" | "<=" | ">=" | "+" | "-" | "*" | "/"
+                | "%" | "&" | "|" | "^"
+                    if local_paren_depth == 0
+                        && local_bracket_depth == 0
+                        && local_brace_depth == 0 =>
+                {
+                    saw_binary_operator = true;
+                }
+                _ => {}
+            }
+            index += consumed;
+        } else {
+            index += 1;
+        }
+    }
+
+    scanned_chars >= 40 || (scanned_chars >= 24 && (saw_method_call || saw_binary_operator))
+}
+
 pub(super) fn next_dotted_member_call_breaks(
     tokens: &[&Token],
     mut index: usize,
@@ -1207,6 +1294,10 @@ pub(super) fn current_output_line(out: &str) -> Option<&str> {
         return None;
     }
     Some(out.rsplit('\n').next().unwrap_or(out))
+}
+
+pub(super) fn should_break_ternary(out: &str) -> bool {
+    current_output_line(out).is_some_and(|line| line.chars().count() >= 60)
 }
 
 pub(super) fn is_word_like_text(text: &str) -> bool {

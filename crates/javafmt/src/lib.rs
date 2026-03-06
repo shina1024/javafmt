@@ -383,4 +383,12 @@ mod tests {
         let expected = "class A {\n  void f() {\n    this.overflowContactCompositeSupportedRenderers =\n        this.getSharePanelResponse\n            .contents\n            .unifiedSharePanelRenderer\n            .contents[0]\n            .connectionSection\n            .connectionsOverflowMenu\n            .connectionsOverflowMenuRenderer\n            .contents[0]\n            .overflowConnectionSectionRenderer\n            .contacts[0];\n  }\n}\n";
         assert_eq!(format_str(input).output, expected);
     }
+
+    #[test]
+    fn matches_upstream_complex_ternary_wrapping_case() {
+        let input = include_str!("../../../fixtures/upstream-gjf/1.34.1/testdata/B24202287.input");
+        let expected =
+            include_str!("../../../fixtures/upstream-gjf/1.34.1/testdata/B24202287.output");
+        assert_eq!(format_str(input).output, expected);
+    }
 }

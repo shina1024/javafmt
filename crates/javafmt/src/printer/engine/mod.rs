@@ -88,6 +88,7 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
     let mut module_continuation_base_indent = 0usize;
     let mut generic_depth = 0usize;
     let mut ternary_depth = 0usize;
+    let mut ternary_multiline_stack: Vec<bool> = Vec::new();
     let mut pending_top_level_directive: Option<TopLevelDirective> = None;
     let mut pending_module_directive: Option<ModuleDirective> = None;
     let mut call_args_continuation_active = false;
@@ -95,6 +96,9 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
     let mut call_args_continuation_base_indent = 0usize;
     let mut call_args_comment_mode = false;
     let mut call_args_vertical_mode = false;
+    let mut array_index_continuation_active = false;
+    let mut array_index_continuation_depth = 0usize;
+    let mut array_index_continuation_base_indent = 0usize;
     let mut chain_continuation_active = false;
     let mut chain_continuation_paren_depth = 0usize;
     let mut chain_continuation_bracket_depth = 0usize;
@@ -657,6 +661,7 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                         }
                         if paren_depth == 0 {
                             ternary_depth = 0;
+                            ternary_multiline_stack.clear();
                             chain_continuation_active = false;
                             chain_continuation_paren_depth = 0;
                             chain_continuation_bracket_depth = 0;
@@ -668,6 +673,11 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                                 call_args_continuation_paren_depth = 0;
                                 call_args_comment_mode = false;
                                 call_args_vertical_mode = false;
+                            }
+                            if array_index_continuation_active {
+                                indent = array_index_continuation_base_indent;
+                                array_index_continuation_active = false;
+                                array_index_continuation_depth = 0;
                             }
                         }
                         if paren_depth == 0 {
@@ -842,15 +852,22 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                         } else {
                             None
                         };
+                        let line_based_break_after_open_paren = wrappable_invocation_open_paren
+                            && current_output_line(out.as_str()).is_some_and(|line| {
+                                line.trim_start().starts_with('.')
+                                    && line.chars().count() >= 40
+                                    && next_text.as_deref() != Some(")")
+                            });
                         let should_break_after_open_paren = if explicit_type_argument_call {
                             call_argument_metrics
                                 .as_ref()
                                 .is_some_and(CallArgumentMetrics::should_break_short)
                         } else {
-                            wrappable_invocation_open_paren
+                            (wrappable_invocation_open_paren
                                 && call_argument_metrics
                                     .as_ref()
-                                    .is_some_and(CallArgumentMetrics::should_break_long)
+                                    .is_some_and(CallArgumentMetrics::should_break_long))
+                                || line_based_break_after_open_paren
                         };
                         let dot_continuation_call = current_output_line(out.as_str())
                             .is_some_and(|line| line.trim_start().starts_with('.'));
@@ -935,26 +952,36 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                         }
                     }
                     "." | "[" | "]" | "::" => {
+                        let should_break_after_open_bracket = symbol == "["
+                            && (current_output_line(out.as_str())
+                                .is_some_and(|line| line.chars().count() >= 50)
+                                || ternary_multiline_stack.last().copied().unwrap_or(false))
+                            && should_break_array_index_expression(
+                                tokens.as_slice(),
+                                i + consumed,
+                                ir.source,
+                            );
                         let top_level_chain_dot = symbol == "."
                             && chain_continuation_active
                             && paren_depth == chain_continuation_paren_depth
                             && bracket_depth == chain_continuation_bracket_depth;
-                        if top_level_chain_dot {
-                            if chain_continuation_dot_count >= chain_keep_leading_dots {
-                                out.push('\n');
-                                at_line_start = true;
-                            }
-                            chain_continuation_dot_count += 1;
-                        } else if symbol == "."
+                        let dotted_member_break = symbol == "."
                             && prev_text.as_deref() == Some(")")
+                            && bracket_depth == 0
                             && (((lambda_continuation_active || chain_continuation_active)
                                 && should_break_before_chained_dot(out.as_str()))
                                 || next_dotted_member_call_breaks(
                                     tokens.as_slice(),
                                     i + consumed,
                                     ir.source,
-                                ))
-                        {
+                                ));
+                        if top_level_chain_dot {
+                            if chain_continuation_dot_count >= chain_keep_leading_dots {
+                                out.push('\n');
+                                at_line_start = true;
+                            }
+                            chain_continuation_dot_count += 1;
+                        } else if dotted_member_break {
                             out.push('\n');
                             at_line_start = true;
                         }
@@ -977,7 +1004,30 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                         );
                         if symbol == "[" {
                             bracket_depth += 1;
+                            if should_break_after_open_bracket {
+                                out.push('\n');
+                                at_line_start = true;
+                                if !array_index_continuation_active {
+                                    array_index_continuation_active = true;
+                                    array_index_continuation_depth = bracket_depth;
+                                    array_index_continuation_base_indent = indent;
+                                    indent +=
+                                        if ternary_multiline_stack.last().copied().unwrap_or(false)
+                                        {
+                                            4
+                                        } else {
+                                            2
+                                        };
+                                }
+                            }
                         } else if symbol == "]" {
+                            if array_index_continuation_active
+                                && bracket_depth == array_index_continuation_depth
+                            {
+                                indent = array_index_continuation_base_indent;
+                                array_index_continuation_active = false;
+                                array_index_continuation_depth = 0;
+                            }
                             bracket_depth = bracket_depth.saturating_sub(1);
                         }
                     }
@@ -1080,17 +1130,40 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                         write_with_indent(&mut out, &mut at_line_start, current_indent, &symbol);
                     }
                     "?" => {
-                        ensure_space(&mut out, at_line_start);
+                        let multiline = should_break_ternary(out.as_str());
+                        if multiline {
+                            out.push('\n');
+                            at_line_start = true;
+                        } else {
+                            ensure_space(&mut out, at_line_start);
+                        }
                         let current_indent = active_indent(indent, &block_stack);
-                        write_with_indent(&mut out, &mut at_line_start, current_indent, "?");
+                        write_with_indent(
+                            &mut out,
+                            &mut at_line_start,
+                            current_indent + if multiline { 2 } else { 0 },
+                            "?",
+                        );
                         out.push(' ');
                         ternary_depth += 1;
+                        ternary_multiline_stack.push(multiline);
                     }
                     ":" => {
                         if ternary_depth > 0 {
-                            ensure_space(&mut out, at_line_start);
+                            let multiline = ternary_multiline_stack.pop().unwrap_or(false);
+                            if multiline {
+                                out.push('\n');
+                                at_line_start = true;
+                            } else {
+                                ensure_space(&mut out, at_line_start);
+                            }
                             let current_indent = active_indent(indent, &block_stack);
-                            write_with_indent(&mut out, &mut at_line_start, current_indent, ":");
+                            write_with_indent(
+                                &mut out,
+                                &mut at_line_start,
+                                current_indent + if multiline { 2 } else { 0 },
+                                ":",
+                            );
                             out.push(' ');
                             ternary_depth = ternary_depth.saturating_sub(1);
                         } else if is_label_colon_context(
