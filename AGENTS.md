@@ -20,7 +20,7 @@ Build a fast Java formatter (`javafmt`) that is byte-compatible with `google-jav
 1. Implement smallest coherent change set with regression tests.
 2. Run:
    - `cargo fmt --all`
-   - `cargo clippy --all-targets`
+   - `cargo clippy --all-targets -- -D warnings`
    - `cargo test --workspace --locked`
    - `cargo run -p gjf-reference -- --runs 3 --max-mismatches 0 --min-gjf-over-javafmt 1.10 --report target/gjf-report-local.json fixtures/java`
 3. If any mismatch appears, inspect and either:
