@@ -19,6 +19,13 @@ enum LineEnding {
     Crlf,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ImportBlock {
+    start: usize,
+    end: usize,
+    suffix_start: usize,
+}
+
 pub fn format_str(input: &str) -> FormatResult {
     let line_ending = detect_line_ending(input);
     let normalized = normalize_newlines(input);
@@ -38,112 +45,150 @@ fn reorder_top_level_imports(input: String) -> String {
         return input;
     }
 
-    let maybe_reordered = {
-        let lines = input.lines().collect::<Vec<_>>();
-        if lines.is_empty() {
+    try_reorder_top_level_imports(&input).unwrap_or(input)
+}
+
+fn try_reorder_top_level_imports(input: &str) -> Option<String> {
+    let lines = input.lines().collect::<Vec<_>>();
+    let import_block = find_import_block(&lines)?;
+    let (mut static_imports, mut normal_imports) =
+        split_import_groups(&lines[import_block.start..import_block.end])?;
+    static_imports.sort_unstable();
+    normal_imports.sort_unstable();
+
+    let reordered = rebuild_reordered_imports(
+        &lines,
+        input.len(),
+        input.ends_with('\n'),
+        import_block,
+        &static_imports,
+        &normal_imports,
+    );
+
+    (reordered != input).then_some(reordered)
+}
+
+fn find_import_block(lines: &[&str]) -> Option<ImportBlock> {
+    if lines.is_empty() {
+        return None;
+    }
+
+    let start = lines.iter().position(|line| line.starts_with("import "))?;
+    if !lines[..start]
+        .iter()
+        .all(|line| line.is_empty() || line.starts_with("package "))
+    {
+        return None;
+    }
+
+    let end = scan_import_block_end(lines, start)?;
+    Some(ImportBlock {
+        start,
+        end,
+        suffix_start: skip_blank_lines(lines, end),
+    })
+}
+
+fn scan_import_block_end(lines: &[&str], start: usize) -> Option<usize> {
+    let mut end = start;
+    while end < lines.len() {
+        let line = lines[end];
+        if line.starts_with("import ") || line.is_empty() {
+            end += 1;
+            continue;
+        }
+
+        return if is_import_block_comment_line(line) {
             None
         } else {
-            let mut first_import_idx = None;
-            let mut invalid_prefix = false;
-            for (idx, line) in lines.iter().enumerate() {
-                if line.starts_with("import ") {
-                    first_import_idx = Some(idx);
-                    break;
-                }
-                if line.is_empty() || line.starts_with("package ") {
-                    continue;
-                }
-                invalid_prefix = true;
-                break;
-            }
-            if invalid_prefix {
-                None
-            } else if let Some(start) = first_import_idx {
-                let mut end = start;
-                let mut has_comment_or_other = false;
-                while end < lines.len() {
-                    let line = lines[end];
-                    if line.starts_with("import ") || line.is_empty() {
-                        end += 1;
-                        continue;
-                    }
-                    has_comment_or_other = line.starts_with("//")
-                        || line.starts_with("/*")
-                        || line.starts_with('*')
-                        || line.starts_with("*/");
-                    break;
-                }
-                if has_comment_or_other || end == start {
-                    None
-                } else {
-                    let import_lines = lines[start..end]
-                        .iter()
-                        .copied()
-                        .filter(|line| !line.is_empty())
-                        .collect::<Vec<_>>();
-                    if import_lines.is_empty() {
-                        None
-                    } else {
-                        let mut static_imports = import_lines
-                            .iter()
-                            .copied()
-                            .filter(|line| line.starts_with("import static "))
-                            .collect::<Vec<_>>();
-                        let mut normal_imports = import_lines
-                            .iter()
-                            .copied()
-                            .filter(|line| !line.starts_with("import static "))
-                            .collect::<Vec<_>>();
-                        static_imports.sort_unstable();
-                        normal_imports.sort_unstable();
+            Some(end)
+        };
+    }
 
-                        let mut out = String::with_capacity(input.len() + 4);
-                        let mut first_line = true;
-                        let mut push_line = |line: &str| {
-                            if !first_line {
-                                out.push('\n');
-                            }
-                            out.push_str(line);
-                            first_line = false;
-                        };
+    (end > start).then_some(end)
+}
 
-                        for line in &lines[..start] {
-                            push_line(line);
-                        }
-                        for line in &static_imports {
-                            push_line(line);
-                        }
-                        if !static_imports.is_empty() && !normal_imports.is_empty() {
-                            push_line("");
-                        }
-                        for line in &normal_imports {
-                            push_line(line);
-                        }
+fn is_import_block_comment_line(line: &str) -> bool {
+    line.starts_with("//")
+        || line.starts_with("/*")
+        || line.starts_with('*')
+        || line.starts_with("*/")
+}
 
-                        if end < lines.len() {
-                            push_line("");
-                            let mut suffix_start = end;
-                            while suffix_start < lines.len() && lines[suffix_start].is_empty() {
-                                suffix_start += 1;
-                            }
-                            for line in &lines[suffix_start..] {
-                                push_line(line);
-                            }
-                        }
+fn split_import_groups<'a>(import_block_lines: &[&'a str]) -> Option<(Vec<&'a str>, Vec<&'a str>)> {
+    let import_lines = import_block_lines
+        .iter()
+        .copied()
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>();
+    if import_lines.is_empty() {
+        return None;
+    }
 
-                        if input.ends_with('\n') {
-                            out.push('\n');
-                        }
-                        if out != input { Some(out) } else { None }
-                    }
-                }
-            } else {
-                None
-            }
+    let mut static_imports = Vec::new();
+    let mut normal_imports = Vec::new();
+    for line in import_lines {
+        if line.starts_with("import static ") {
+            static_imports.push(line);
+        } else {
+            normal_imports.push(line);
         }
-    };
+    }
 
-    maybe_reordered.unwrap_or(input)
+    Some((static_imports, normal_imports))
+}
+
+fn rebuild_reordered_imports(
+    lines: &[&str],
+    input_len: usize,
+    preserve_trailing_newline: bool,
+    import_block: ImportBlock,
+    static_imports: &[&str],
+    normal_imports: &[&str],
+) -> String {
+    let mut out = String::with_capacity(input_len + 4);
+    let mut first_line = true;
+
+    for line in &lines[..import_block.start] {
+        push_output_line(&mut out, &mut first_line, line);
+    }
+    for line in static_imports {
+        push_output_line(&mut out, &mut first_line, line);
+    }
+    if !static_imports.is_empty() && !normal_imports.is_empty() {
+        push_output_line(&mut out, &mut first_line, "");
+    }
+    for line in normal_imports {
+        push_output_line(&mut out, &mut first_line, line);
+    }
+
+    if import_block.end < lines.len() {
+        push_output_line(&mut out, &mut first_line, "");
+        for line in &lines[import_block.suffix_start..] {
+            push_output_line(&mut out, &mut first_line, line);
+        }
+    }
+
+    if preserve_trailing_newline {
+        out.push('\n');
+    }
+
+    out
+}
+
+fn push_output_line(out: &mut String, first_line: &mut bool, line: &str) {
+    if !*first_line {
+        out.push('\n');
+    }
+    out.push_str(line);
+    *first_line = false;
+}
+
+fn skip_blank_lines(lines: &[&str], mut index: usize) -> usize {
+    while index < lines.len() && lines[index].is_empty() {
+        index += 1;
+    }
+    index
 }
 
 fn detect_line_ending(input: &str) -> LineEnding {
@@ -213,7 +258,7 @@ fn normalize_newlines(input: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::format_str;
+    use super::{format_str, reorder_top_level_imports};
 
     #[test]
     fn keeps_formatted_text_unchanged() {
@@ -295,5 +340,24 @@ mod tests {
                 .output
                 .contains("import java.util.List;\n// c\nimport static")
         );
+    }
+
+    #[test]
+    fn import_reorder_skips_non_package_prefix_content() {
+        let input = "class A {}\nimport java.util.List;\n";
+        assert_eq!(reorder_top_level_imports(input.to_owned()), input);
+    }
+
+    #[test]
+    fn import_reorder_preserves_comment_adjacent_suffix() {
+        let input = "package p;\nimport java.util.List;\n\n// keep with the type\nclass A {}\n";
+        assert_eq!(reorder_top_level_imports(input.to_owned()), input);
+    }
+
+    #[test]
+    fn import_reorder_rebuilds_prefix_groups_and_suffix() {
+        let input = "package p;\n\nimport java.util.List;\nimport static java.util.Collections.emptyList;\n\n\nclass A {}\n";
+        let expected = "package p;\n\nimport static java.util.Collections.emptyList;\n\nimport java.util.List;\n\nclass A {}\n";
+        assert_eq!(reorder_top_level_imports(input.to_owned()), expected);
     }
 }
