@@ -173,38 +173,6 @@ pub(super) fn has_chained_call_continuation(
     dot_after_call_count >= 1
 }
 
-pub(super) fn has_block_comment_argument_list(
-    tokens: &[&Token],
-    mut index: usize,
-    source: &str,
-) -> bool {
-    let mut local_paren_depth = 0usize;
-
-    while index < tokens.len() {
-        let token = tokens[index];
-        match token.kind {
-            TokenKind::BlockComment => return true,
-            TokenKind::Symbol => {
-                let (symbol, consumed) = read_symbol(tokens, index, source);
-                match symbol {
-                    "(" => local_paren_depth += 1,
-                    ")" => {
-                        if local_paren_depth == 0 {
-                            break;
-                        }
-                        local_paren_depth -= 1;
-                    }
-                    _ => {}
-                }
-                index += consumed;
-            }
-            _ => index += 1,
-        }
-    }
-
-    false
-}
-
 pub(super) fn should_break_annotation_arguments(
     tokens: &[&Token],
     mut index: usize,
@@ -246,32 +214,6 @@ pub(super) fn should_break_annotation_arguments(
     saw_top_level_equals && saw_top_level_comma
 }
 
-pub(super) fn should_break_call_arguments(tokens: &[&Token], index: usize, source: &str) -> bool {
-    call_arguments_break_metrics(tokens, index, source)
-        .is_some_and(|metrics| metrics.scanned_chars >= 30 && metrics.top_level_comma_count >= 1)
-}
-
-pub(super) fn should_break_long_call_arguments(
-    tokens: &[&Token],
-    index: usize,
-    source: &str,
-) -> bool {
-    call_arguments_break_metrics(tokens, index, source)
-        .is_some_and(|metrics| metrics.scanned_chars >= 60 && metrics.top_level_comma_count >= 1)
-}
-
-pub(super) fn should_force_vertical_call_arguments(
-    tokens: &[&Token],
-    index: usize,
-    source: &str,
-) -> bool {
-    call_arguments_break_metrics(tokens, index, source).is_some_and(|metrics| {
-        (metrics.saw_top_level_newline && metrics.max_input_line_args > 2)
-            || metrics.first_arg_has_call
-            || metrics.top_level_call_arg_count >= 2
-    })
-}
-
 pub(super) fn call_arguments_break_metrics(
     tokens: &[&Token],
     mut index: usize,
@@ -290,10 +232,14 @@ pub(super) fn call_arguments_break_metrics(
     let mut saw_any_argument_token = false;
     let mut saw_first_arg = false;
     let mut saw_top_level_newline = false;
+    let mut has_block_comment = false;
 
     while index < tokens.len() {
         let token = tokens[index];
         scanned_chars += token.end.saturating_sub(token.start);
+        if token.kind == TokenKind::BlockComment {
+            has_block_comment = true;
+        }
         if token.kind == TokenKind::Symbol {
             let (symbol, consumed) = read_symbol(tokens, index, source);
             let next_index = index + consumed;
@@ -405,6 +351,7 @@ pub(super) fn call_arguments_break_metrics(
         first_arg_has_call,
         max_input_line_args,
         saw_top_level_newline,
+        has_block_comment,
     })
 }
 
@@ -415,6 +362,27 @@ pub(super) struct CallArgumentMetrics {
     first_arg_has_call: bool,
     max_input_line_args: usize,
     saw_top_level_newline: bool,
+    has_block_comment: bool,
+}
+
+impl CallArgumentMetrics {
+    pub(super) fn should_break_short(&self) -> bool {
+        self.scanned_chars >= 30 && self.top_level_comma_count >= 1
+    }
+
+    pub(super) fn should_break_long(&self) -> bool {
+        self.scanned_chars >= 60 && self.top_level_comma_count >= 1
+    }
+
+    pub(super) fn should_force_vertical(&self) -> bool {
+        (self.saw_top_level_newline && self.max_input_line_args > 2)
+            || self.first_arg_has_call
+            || self.top_level_call_arg_count >= 2
+    }
+
+    pub(super) fn has_block_comment(&self) -> bool {
+        self.has_block_comment
+    }
 }
 
 pub(super) fn should_keep_inline_annotation(

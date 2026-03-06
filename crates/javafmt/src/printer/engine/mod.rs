@@ -793,20 +793,30 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                         write_with_indent(&mut out, &mut at_line_start, current_indent, "(");
                         let explicit_type_argument_call =
                             is_explicit_type_argument_call(tokens.as_slice(), i, ir.source);
-                        let should_break_after_open_paren = if explicit_type_argument_call {
-                            should_break_call_arguments(tokens.as_slice(), i + consumed, ir.source)
-                        } else {
-                            is_wrappable_invocation_open_paren(
+                        let wrappable_invocation_open_paren = !explicit_type_argument_call
+                            && is_wrappable_invocation_open_paren(
                                 tokens.as_slice(),
                                 i,
                                 ir.source,
                                 &prev_kind,
                                 prev_text.as_deref(),
-                            ) && should_break_long_call_arguments(
-                                tokens.as_slice(),
-                                i + consumed,
-                                ir.source,
-                            )
+                            );
+                        let call_argument_metrics = if explicit_type_argument_call
+                            || wrappable_invocation_open_paren
+                        {
+                            call_arguments_break_metrics(tokens.as_slice(), i + consumed, ir.source)
+                        } else {
+                            None
+                        };
+                        let should_break_after_open_paren = if explicit_type_argument_call {
+                            call_argument_metrics
+                                .as_ref()
+                                .is_some_and(CallArgumentMetrics::should_break_short)
+                        } else {
+                            wrappable_invocation_open_paren
+                                && call_argument_metrics
+                                    .as_ref()
+                                    .is_some_and(CallArgumentMetrics::should_break_long)
                         };
                         paren_depth += 1;
                         if prev_text.as_deref() == Some("try") {
@@ -841,16 +851,12 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                                 call_args_continuation_active = true;
                                 call_args_continuation_paren_depth = paren_depth;
                                 call_args_continuation_base_indent = indent;
-                                call_args_comment_mode = has_block_comment_argument_list(
-                                    tokens.as_slice(),
-                                    i + consumed,
-                                    ir.source,
-                                );
-                                call_args_vertical_mode = should_force_vertical_call_arguments(
-                                    tokens.as_slice(),
-                                    i + consumed,
-                                    ir.source,
-                                );
+                                call_args_comment_mode = call_argument_metrics
+                                    .as_ref()
+                                    .is_some_and(CallArgumentMetrics::has_block_comment);
+                                call_args_vertical_mode = call_argument_metrics
+                                    .as_ref()
+                                    .is_some_and(CallArgumentMetrics::should_force_vertical);
                                 indent += 2;
                             }
                         }
