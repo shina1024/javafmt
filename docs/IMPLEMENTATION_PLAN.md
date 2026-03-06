@@ -31,6 +31,10 @@ Initial implementation should target full-file formatting first. Line-range form
 
 ## 4. System Architecture
 
+The project is entering a compatibility-first rewrite phase. The previous token-driven printer
+proved useful for fast local progress, but it is not a scalable path to full GJF compatibility.
+From this point forward, the target architecture is a structured formatter:
+
 Formatter pipeline:
 
 1. **Input Normalization**
@@ -40,14 +44,15 @@ Formatter pipeline:
 2. **Lexer**
    - fast tokenization over UTF-8 bytes
    - preserve comments and whitespace anchors
-3. **Parser / Concrete Syntax Tree (CST)**
+3. **Lossless Syntax Tree**
    - parse Java grammar for targeted language versions
-   - retain enough structure to reproduce comment attachment and break decisions
-4. **Attachment Phase**
+   - retain token spans, delimiters, and trivia ownership
+   - represent declarations, statements, expressions, and comment anchors explicitly
+4. **Comment / Trivia Attachment**
    - attach comments to nearest stable syntax nodes
-   - classify comments (`leading`, `trailing`, `dangling`)
-5. **Format IR Builder**
-   - transform CST into a compact doc IR (groups, indents, soft/hard breaks)
+   - classify comments (`leading`, `trailing`, `dangling`, `line-suffix`, `javadoc`)
+5. **Doc Builder**
+   - transform syntax nodes into a compact doc IR (groups, indents, soft/hard breaks)
    - model GJF behavior for wrapping and continuation indent
 6. **Line-Break Solver / Printer**
    - choose breakpoints under max column constraint
@@ -56,12 +61,18 @@ Formatter pipeline:
    - emit formatted text with selected line ending mode
    - validate token-equivalence in debug/test mode
 
-### 4.1 Dual-Path Execution Model
+### 4.1 Rewrite Execution Model
 
-- **Fast path (default):** token-driven single-pass formatting for unambiguous/common syntax.
-- **Structured path (fallback):** parser-assisted formatting for ambiguous/high-risk syntax constructs.
-- **Dispatch rule:** choose fast path first, switch to structured path only for constructs known to cause ambiguity.
-- **Constraint:** fallback must reuse existing lex/parse artifacts and must not re-lex/re-parse full files repeatedly.
+- **Current transitional state:** legacy token-heuristic formatting remains in-tree only to keep
+  local gates green while the rewrite lands incrementally.
+- **Target default path:** lossless syntax tree -> doc builder -> layout solver.
+- **Migration rule:** new subsystem formatters replace legacy behavior one syntax family at a time
+  (`expression` -> `declaration header` -> `statement/block` -> `comment/javadoc`).
+- **Non-rule:** preserving the legacy formatter's exact internal behavior is not required during
+  migration; rewrite each subsystem in the way that most directly improves full-suite
+  compatibility.
+- **Exit condition:** remove the legacy formatter once the rewritten path owns the default
+  end-to-end pipeline and is measured against the upstream full suite.
 
 ## 5. Design Principles for Speed
 
@@ -77,7 +88,8 @@ Formatter pipeline:
 - warm-cache friendly data layout
 - hard complexity target: O(n) with respect to input bytes/tokens for the common path
 - no per-file unbounded backtracking or repeated full-token rescans in hot loops
-- compatibility fixes must preserve the fast-path eligibility rate for common code patterns
+- during the rewrite, compatibility may temporarily take precedence over raw throughput
+- once the structured formatter is default, recover performance with profiling-driven work
 
 ## 6. GJF Compatibility Strategy
 
@@ -97,11 +109,11 @@ Latest-follow policy for GJF:
 
 Prioritize compatibility in this order:
 
-1. whitespace and indentation in blocks/statements
-2. method chains and argument wrapping
-3. annotations and modifiers
-4. lambdas, generics, and complex expressions
-5. comment placement edge cases
+1. complex expressions and wrapping decisions
+2. declaration headers (annotations, modifiers, type parameters, extends/implements)
+3. block / statement formatting
+4. comment and javadoc placement
+5. import-only and line-ending post-processing
 
 ## 7. Testing Strategy
 
@@ -164,43 +176,56 @@ Exit criteria:
 
 - can run differential comparison tool end-to-end on sample corpus
 
-### Phase 1: Core Parser + Basic Formatter
+### Phase 1: Rewrite Scaffold
 
 Deliverables:
 
-- parse major declarations/statements/expressions
-- emit deterministic formatted output for common Java
-- pass idempotence tests on base fixtures
+- introduce `syntax` and `format` module boundaries
+- keep public API stable while legacy formatting moves behind internal wrappers
+- define lossless syntax-tree data model and doc primitives
 
 Exit criteria:
 
-- stable formatting for representative production-style files
+- rewrite skeleton is the default internal pipeline boundary
+- local fixtures and reference gate still pass
 
-### Phase 2: Compatibility Expansion
+### Phase 2: Expression / Declaration Rewrite
 
 Deliverables:
 
-- close high-frequency diffs vs GJF
-- robust comment attachment and wrapping behavior
-- broaden Java syntax coverage
+- replace legacy expression formatting with structured formatting
+- replace declaration-header formatting with structured formatting
+- measure upstream suite progress primarily by full-suite pass rate
 
 Exit criteria:
 
-- high compatibility on curated corpus (target >= 99% files byte-equivalent)
+- major complex-expression and declaration diffs are addressed
 
-### Phase 3: Performance Optimization
+### Phase 3: Statement / Comment Rewrite
 
 Deliverables:
 
-- profiling-driven hot-path improvements
-- parallel file formatting
-- reduced allocations and improved throughput
+- replace block/statement formatting with structured formatting
+- add dedicated comment/javadoc handling
+- reduce reliance on token heuristics to compatibility-specific post-processing only
 
 Exit criteria:
 
-- measurable speedup vs GJF baseline on agreed benchmarks
+- upstream suite pass rate is high enough that remaining failures are tail cases
 
-### Phase 4: Hardening and Release
+### Phase 4: Compatibility Closure and Performance Recovery
+
+Deliverables:
+
+- close remaining upstream suite gaps
+- remove the legacy formatter
+- profile and recover throughput / allocation regressions in the new path
+
+Exit criteria:
+
+- full-suite compatibility target is achieved or close enough that failures are explicitly tracked
+
+### Phase 5: Hardening and Release
 
 Deliverables:
 
@@ -277,7 +302,7 @@ Pending (decide after baseline measurement in Phase 0):
 4. Comment attachment quality should be improved without introducing branch-heavy hot loops.
 5. Compatibility fixes must be accepted only when benchmark impact stays within budget.
 
-## 15. Repository Layout (Phase 0/1)
+## 15. Repository Layout (Rewrite Target)
 
 ```text
 javafmt/
@@ -286,13 +311,23 @@ javafmt/
     javafmt/
       src/
         lib.rs
-        lexer/
-        parser/
-        cst/
-        comments/
-        ir/
-        printer/
-        emit/
+        compat.rs
+        syntax.rs
+        syntax/
+          lexer.rs
+          token.rs
+          trivia.rs
+          tree.rs
+          parser.rs
+        format.rs
+        format/
+          doc.rs
+          layout.rs
+          file.rs
+          decl.rs
+          stmt.rs
+          expr.rs
+          comments.rs
     javafmt-cli/
       src/main.rs
     gjf-reference/
@@ -322,7 +357,7 @@ Naming policy:
 
 ## 16. Current Status Snapshot (2026-03-06)
 
-Implementation is actively in progress and already beyond Phase 0/1:
+Implementation is actively in progress and the next major phase is a structural rewrite:
 
 - current branch head includes recent tooling and hardening improvements through commit `f7ab5db`
 - pinned GJF version: `1.34.1` (`tools/gjf/version.txt`)
@@ -347,6 +382,12 @@ Implemented compatibility coverage in recent cycles:
 - CI format gate aligned with local workflow (`cargo fmt --all --check`)
 - reusable `cargo bench -p javafmt --bench format_bench` harness with fixture fallback
 - token-preservation regression coverage for representative rewrite cases
+
+Rewrite work now approved:
+
+- breaking internal file/module layout changes are allowed
+- legacy parser / IR / printer layers may be replaced rather than incrementally preserved
+- upstream full-suite pass rate is the primary architectural driver
 
 Known caveats / guardrails:
 

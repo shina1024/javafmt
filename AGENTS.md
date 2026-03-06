@@ -15,6 +15,20 @@ Build a fast Java formatter (`javafmt`) that is byte-compatible with `google-jav
   - `mismatches=0`
   - `gjf_over_javafmt_ratio=2640.332695829754`
 
+## Current Rewrite Direction (2026-03-07)
+
+- The current token-heuristic formatter is now treated as transitional infrastructure.
+- The approved direction is a compatibility-first rewrite around `syntax` and `format` layers:
+  - lossless syntax tree with token/trivia spans
+  - doc/layout-based formatter
+  - dedicated comment/javadoc formatting path
+- Preserving the current formatter's internal behavior is not a goal by itself; replace subsystems outright when that shortens the path to full GJF compatibility.
+- Rewrite priority order is:
+  1. upstream full-suite pass rate
+  2. local reference corpus stability
+  3. performance recovery
+- Until the new formatter becomes default, keep the current local gates green on every landed change.
+
 ## Required Workflow For Any Change
 
 1. Implement smallest coherent change set with regression tests.
