@@ -58,6 +58,10 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
     let mut annotation_active = false;
     let mut annotation_paren_depth = 0usize;
     let mut annotation_brace_depth = 0usize;
+    let mut annotation_has_args = false;
+    let mut annotation_name: Option<String> = None;
+    let mut annotation_started_line_start = false;
+    let mut annotation_inline_run_active = false;
     let mut annotation_multiline_args_active = false;
     let mut annotation_multiline_args_paren_depth = 0usize;
     let mut annotation_multiline_base_indent = 0usize;
@@ -89,6 +93,7 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
         let token = tokens[i];
         match token.kind {
             TokenKind::LineComment => {
+                annotation_inline_run_active = false;
                 let arrow_comment = prev_text.as_deref() == Some("->");
                 if i > 0
                     && at_line_start
@@ -132,6 +137,7 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                 i += 1;
             }
             TokenKind::BlockComment => {
+                annotation_inline_run_active = false;
                 let started_line_start = at_line_start;
                 let attach_after_statement = i > 0
                     && at_line_start
@@ -174,6 +180,7 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                 let word = token_text(ir.source, token);
                 let suppress_space_for_non_sealed = pending_non_sealed && word == "sealed";
                 pending_non_sealed = false;
+                annotation_inline_run_active = false;
                 if is_switch_label(word, &block_stack) {
                     if let Some(frame) = block_stack.last_mut() {
                         frame.in_switch_case = false;
@@ -401,14 +408,31 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                 if annotation_active && annotation_paren_depth == 0 {
                     let next = next_symbol_text(tokens.as_slice(), i, ir.source);
                     if next.as_deref() != Some(".") && next.as_deref() != Some("(") {
+                        let in_type_body = block_stack.last().is_some_and(|frame| {
+                            matches!(frame.kind, BlockKind::TypeBody | BlockKind::EnumBody)
+                        });
+                        let keep_inline = should_keep_inline_annotation(
+                            tokens.as_slice(),
+                            i,
+                            ir.source,
+                            in_type_body,
+                            block_stack.is_empty() && paren_depth == 0,
+                            annotation_name.as_deref(),
+                            annotation_started_line_start,
+                            annotation_has_args,
+                            paren_depth,
+                        );
                         annotation_active = false;
                         annotation_brace_depth = 0;
+                        annotation_has_args = false;
+                        annotation_name = None;
+                        annotation_inline_run_active = keep_inline;
                         if annotation_multiline_args_active {
                             indent = annotation_multiline_base_indent;
                             annotation_multiline_args_active = false;
                             annotation_multiline_args_paren_depth = 0;
                         }
-                        if paren_depth == 0 && !at_line_start {
+                        if !keep_inline && paren_depth == 0 && !at_line_start {
                             out.push('\n');
                             at_line_start = true;
                         }
@@ -428,14 +452,27 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
             TokenKind::Symbol => {
                 let (symbol, consumed) = read_symbol(tokens.as_slice(), i, ir.source);
                 let next_text = next_symbol_text(tokens.as_slice(), i + consumed, ir.source);
+                if symbol != "@" {
+                    annotation_inline_run_active = false;
+                }
 
                 match symbol {
                     "@" => {
                         let annotation_declaration =
                             next_symbol_text(tokens.as_slice(), i + consumed, ir.source).as_deref()
                                 == Some("interface");
+                        let in_type_body = block_stack.last().is_some_and(|frame| {
+                            matches!(frame.kind, BlockKind::TypeBody | BlockKind::EnumBody)
+                        });
                         if !at_line_start {
-                            if paren_depth > 0 || annotation_declaration {
+                            if paren_depth > 0
+                                || annotation_declaration
+                                || annotation_inline_run_active
+                                || should_start_annotation_inline(
+                                    prev_text.as_deref(),
+                                    in_type_body,
+                                )
+                            {
                                 if needs_space_before(&prev_text, "@", at_line_start) {
                                     ensure_space(&mut out, at_line_start);
                                 }
@@ -444,18 +481,26 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                                 at_line_start = true;
                             }
                         }
+                        annotation_started_line_start = at_line_start;
+                        annotation_name =
+                            next_symbol_text(tokens.as_slice(), i + consumed, ir.source)
+                                .filter(|text| is_word_like_text(text))
+                                .map(str::to_owned);
                         let current_indent = active_indent(indent, &block_stack);
                         write_with_indent(&mut out, &mut at_line_start, current_indent, "@");
                         if annotation_declaration {
                             annotation_active = false;
                             annotation_paren_depth = 0;
                             annotation_brace_depth = 0;
+                            annotation_has_args = false;
+                            annotation_name = None;
                             annotation_multiline_args_active = false;
                             annotation_multiline_args_paren_depth = 0;
                         } else {
                             annotation_active = true;
                             annotation_paren_depth = 0;
                             annotation_brace_depth = 0;
+                            annotation_has_args = false;
                             annotation_multiline_args_active = false;
                             annotation_multiline_args_paren_depth = 0;
                         }
@@ -759,6 +804,9 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                             try_resource_paren_depth = paren_depth;
                         }
                         if annotation_active {
+                            if annotation_paren_depth == 0 {
+                                annotation_has_args = true;
+                            }
                             annotation_paren_depth += 1;
                             if annotation_paren_depth == 1
                                 && should_break_annotation_arguments(
@@ -1080,14 +1128,31 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                     if symbol != "@" && symbol != "." {
                         let next = next_symbol_text(tokens.as_slice(), i, ir.source);
                         if next.as_deref() != Some(".") && next.as_deref() != Some("(") {
+                            let in_type_body = block_stack.last().is_some_and(|frame| {
+                                matches!(frame.kind, BlockKind::TypeBody | BlockKind::EnumBody)
+                            });
+                            let keep_inline = should_keep_inline_annotation(
+                                tokens.as_slice(),
+                                i,
+                                ir.source,
+                                in_type_body,
+                                block_stack.is_empty() && paren_depth == 0,
+                                annotation_name.as_deref(),
+                                annotation_started_line_start,
+                                annotation_has_args,
+                                paren_depth,
+                            );
                             annotation_active = false;
                             annotation_brace_depth = 0;
+                            annotation_has_args = false;
+                            annotation_name = None;
+                            annotation_inline_run_active = keep_inline;
                             if annotation_multiline_args_active {
                                 indent = annotation_multiline_base_indent;
                                 annotation_multiline_args_active = false;
                                 annotation_multiline_args_paren_depth = 0;
                             }
-                            if paren_depth == 0 && !at_line_start {
+                            if !keep_inline && paren_depth == 0 && !at_line_start {
                                 out.push('\n');
                                 at_line_start = true;
                             }
@@ -1096,6 +1161,7 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                 }
             }
             TokenKind::StringLiteral | TokenKind::CharLiteral => {
+                annotation_inline_run_active = false;
                 let text = token_text(ir.source, token);
                 if needs_space_before(&prev_text, text, at_line_start) {
                     ensure_space(&mut out, at_line_start);
@@ -1411,6 +1477,161 @@ fn call_arguments_break_metrics(
     }
 
     Some((scanned_chars, top_level_comma_count))
+}
+
+fn should_keep_inline_annotation(
+    tokens: &[&Token],
+    index: usize,
+    source: &str,
+    in_type_body: bool,
+    top_level_declaration: bool,
+    annotation_name: Option<&str>,
+    annotation_started_line_start: bool,
+    annotation_has_args: bool,
+    paren_depth: usize,
+) -> bool {
+    if paren_depth > 0 || !annotation_started_line_start {
+        return true;
+    }
+
+    if top_level_declaration {
+        return false;
+    }
+
+    if !in_type_body {
+        return !annotation_has_args;
+    }
+
+    if annotation_has_args || is_declaration_like_annotation(annotation_name) {
+        return false;
+    }
+
+    let next_text = next_symbol_text(tokens, index, source);
+    match next_text {
+        Some("@") => is_type_use_friendly_annotation(annotation_name),
+        Some(word)
+            if is_declaration_modifier(word)
+                || is_type_declaration_keyword(word)
+                || is_primitive_or_void(word) =>
+        {
+            false
+        }
+        Some(word) if is_word_like_text(word) => looks_like_typed_member(tokens, index, source),
+        _ => false,
+    }
+}
+
+fn should_start_annotation_inline(prev_text: Option<&str>, in_type_body: bool) -> bool {
+    matches!(prev_text, Some(text) if is_declaration_modifier(text))
+        || (!in_type_body && matches!(prev_text, Some("new")))
+        || matches!(prev_text, Some("@" | "." | "::"))
+}
+
+fn looks_like_typed_member(tokens: &[&Token], index: usize, source: &str) -> bool {
+    let Some(after_type) = consume_type_like(tokens, index, source) else {
+        return false;
+    };
+    tokens
+        .get(after_type)
+        .is_some_and(|token| token.kind == TokenKind::Word)
+}
+
+fn consume_type_like(tokens: &[&Token], mut index: usize, source: &str) -> Option<usize> {
+    let token = tokens.get(index)?;
+    if token.kind != TokenKind::Word {
+        return None;
+    }
+
+    let word = token_text(source, token);
+    if is_declaration_modifier(word)
+        || is_type_declaration_keyword(word)
+        || is_primitive_or_void(word)
+    {
+        return None;
+    }
+
+    index += 1;
+    loop {
+        let Some(token) = tokens.get(index) else {
+            return Some(index);
+        };
+        if token.kind != TokenKind::Symbol {
+            return Some(index);
+        }
+
+        let (symbol, consumed) = read_symbol(tokens, index, source);
+        match symbol {
+            "." => {
+                let next = tokens.get(index + consumed)?;
+                if next.kind != TokenKind::Word {
+                    return Some(index);
+                }
+                index += consumed + 1;
+            }
+            "<" if looks_like_type_argument_list(tokens, index, source) => {
+                index = skip_type_arguments(tokens, index, source);
+            }
+            "[" => {
+                if next_symbol_text(tokens, index + consumed, source).as_deref() != Some("]") {
+                    return Some(index);
+                }
+                index += consumed;
+                let (_, close_consumed) = read_symbol(tokens, index, source);
+                index += close_consumed;
+            }
+            _ => return Some(index),
+        }
+    }
+}
+
+fn skip_type_arguments(tokens: &[&Token], mut index: usize, source: &str) -> usize {
+    let mut depth = 0usize;
+    while index < tokens.len() {
+        let token = tokens[index];
+        if token.kind == TokenKind::Symbol {
+            let (symbol, consumed) = read_symbol(tokens, index, source);
+            match symbol {
+                "<" => depth += 1,
+                ">" => depth = depth.saturating_sub(1),
+                ">>" => depth = depth.saturating_sub(2),
+                ">>>" => depth = depth.saturating_sub(3),
+                _ => {}
+            }
+            index += consumed;
+            if depth == 0 {
+                break;
+            }
+        } else {
+            index += 1;
+        }
+    }
+    index
+}
+
+fn is_declaration_like_annotation(annotation_name: Option<&str>) -> bool {
+    matches!(
+        annotation_name,
+        Some(
+            "Deprecated"
+                | "Override"
+                | "SuppressWarnings"
+                | "SafeVarargs"
+                | "FunctionalInterface"
+                | "Documented"
+                | "Inherited"
+                | "Repeatable"
+                | "Retention"
+                | "Target"
+                | "Native"
+        )
+    )
+}
+
+fn is_type_use_friendly_annotation(annotation_name: Option<&str>) -> bool {
+    matches!(
+        annotation_name,
+        Some("Nullable" | "NonNull" | "Nonnull" | "CheckForNull" | "PolyNull" | "Untainted")
+    )
 }
 
 fn is_wrappable_invocation_open_paren(
@@ -1909,6 +2130,33 @@ fn current_output_line(out: &str) -> Option<&str> {
 
 fn is_word_like_text(text: &str) -> bool {
     text.chars().all(|ch| ch.is_alphanumeric() || ch == '_')
+}
+
+fn is_declaration_modifier(text: &str) -> bool {
+    matches!(
+        text,
+        "public"
+            | "protected"
+            | "private"
+            | "static"
+            | "final"
+            | "abstract"
+            | "default"
+            | "native"
+            | "strictfp"
+            | "synchronized"
+            | "transient"
+            | "volatile"
+            | "sealed"
+            | "non"
+    )
+}
+
+fn is_primitive_or_void(text: &str) -> bool {
+    matches!(
+        text,
+        "void" | "boolean" | "byte" | "short" | "int" | "long" | "char" | "float" | "double"
+    )
 }
 
 fn is_unary_prefix_context(prev_text: Option<&str>) -> bool {
@@ -2450,6 +2698,75 @@ mod tests {
         assert!(printed.text.contains("int b = 1;\n\n  int c = 1;"));
         assert!(printed.text.contains("int d = 1;\n\n  int e = 1;"));
         assert!(printed.text.contains("int e = 1;\n\n}\n"));
+    }
+
+    #[test]
+    fn keeps_type_use_annotations_inline() {
+        let source = "class A{@Deprecated public @Nullable Object f(){@Nullable Bar bar=bar();return null;}public @Deprecated Object g(){return null;}@Deprecated @Nullable A(){} @Nullable @Nullable Object h(){return null;} Object bar(){return null;} static class Bar{}}";
+        let lexed = lexer::lex(source);
+        let cst = parser::parse(&lexed);
+        let attachments = comments::attach(&cst, &lexed);
+        let ir = ir::build(&cst, attachments);
+        let printed = print(&ir);
+        assert!(
+            printed
+                .text
+                .contains("@Deprecated\n  public @Nullable Object f() {")
+        );
+        assert!(printed.text.contains("@Nullable Bar bar = bar();"));
+        assert!(printed.text.contains("public @Deprecated Object g() {"));
+        assert!(printed.text.contains("@Deprecated\n  @Nullable\n  A() {}"));
+    }
+
+    #[test]
+    fn formats_local_annotations_like_gjf() {
+        let source =
+            "class A{{@Foo final Object x;@Foo(1) final Object y;@Foo(x=1) final Object z;}}";
+        let lexed = lexer::lex(source);
+        let cst = parser::parse(&lexed);
+        let attachments = comments::attach(&cst, &lexed);
+        let ir = ir::build(&cst, attachments);
+        let printed = print(&ir);
+        assert!(printed.text.contains("@Foo final Object x;"));
+        assert!(printed.text.contains("@Foo(1)\n    final Object y;"));
+        assert!(printed.text.contains("@Foo(x = 1)\n    final Object z;"));
+    }
+
+    #[test]
+    fn breaks_argument_member_annotations_in_type_body() {
+        let source = "class A{@SuppressWarnings({\"unchecked\",\"rawtypes\"}) void f(){}}";
+        let lexed = lexer::lex(source);
+        let cst = parser::parse(&lexed);
+        let attachments = comments::attach(&cst, &lexed);
+        let ir = ir::build(&cst, attachments);
+        let printed = print(&ir);
+        assert!(
+            printed
+                .text
+                .contains("@SuppressWarnings({\"unchecked\", \"rawtypes\"})\n  void f() {")
+        );
+    }
+
+    #[test]
+    fn breaks_override_annotation_before_member_signature() {
+        let source = "class A{@Override String f(){return \"\";}}";
+        let lexed = lexer::lex(source);
+        let cst = parser::parse(&lexed);
+        let attachments = comments::attach(&cst, &lexed);
+        let ir = ir::build(&cst, attachments);
+        let printed = print(&ir);
+        assert!(printed.text.contains("@Override\n  String f() {"));
+    }
+
+    #[test]
+    fn breaks_top_level_annotations_before_module_declaration() {
+        let source = "@A @B module m{}";
+        let lexed = lexer::lex(source);
+        let cst = parser::parse(&lexed);
+        let attachments = comments::attach(&cst, &lexed);
+        let ir = ir::build(&cst, attachments);
+        let printed = print(&ir);
+        assert!(printed.text.contains("@A\n@B\nmodule m {"));
     }
 
     #[test]
