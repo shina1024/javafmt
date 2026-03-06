@@ -4,16 +4,16 @@
 
 Build a fast Java formatter (`javafmt`) that is byte-compatible with `google-java-format` (GJF) while keeping `gofmt`-like operational simplicity.
 
-## Current Baseline (2026-02-27)
+## Current Baseline (2026-03-06)
 
 - Java target: `25` (LTS)
 - GJF target: latest stable, currently pinned to `1.34.1` (`tools/gjf/version.txt`)
-- Latest successful CI run: `22495083534`
+- Latest successful CI run: `22767398922`
 - Latest local reference gate snapshot (`target/gjf-report-local.json`):
   - `runs=3`
   - `files=79`
   - `mismatches=0`
-  - `gjf_over_javafmt_ratio=2659.04074266736`
+  - `gjf_over_javafmt_ratio=2640.332695829754`
 
 ## Required Workflow For Any Change
 

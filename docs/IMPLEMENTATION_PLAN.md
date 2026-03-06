@@ -320,20 +320,20 @@ Naming policy:
 
 - use `reference` in module/folder names for GJF comparison tooling
 
-## 16. Current Status Snapshot (2026-02-27)
+## 16. Current Status Snapshot (2026-03-06)
 
 Implementation is actively in progress and already beyond Phase 0/1:
 
-- current branch head includes compatibility improvements through commit `4e03260`
+- current branch head includes recent tooling and hardening improvements through commit `f7ab5db`
 - pinned GJF version: `1.34.1` (`tools/gjf/version.txt`)
-- latest successful CI run: `22495083534` (both `test` and `reference` jobs succeeded)
+- latest successful CI run: `22767398922` (both `test` and `reference` jobs succeeded)
 
 Latest local reference gate result (`target/gjf-report-local.json`):
 
 - runs: `3`
 - files: `79`
 - mismatches: `0`
-- `gjf_over_javafmt_ratio`: `2659.04074266736`
+- `gjf_over_javafmt_ratio`: `2640.332695829754`
 
 Implemented compatibility coverage in recent cycles:
 
@@ -344,6 +344,9 @@ Implemented compatibility coverage in recent cycles:
 - annotation handling (`@interface`, named argument wrapping)
 - explicit generic-call wrapping and diamond operator spacing
 - top-level import ordering for GJF compatibility (`static` first, lexical order in groups)
+- CI format gate aligned with local workflow (`cargo fmt --all --check`)
+- reusable `cargo bench -p javafmt --bench format_bench` harness with fixture fallback
+- token-preservation regression coverage for representative rewrite cases
 
 Known caveats / guardrails:
 
