@@ -83,11 +83,13 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
     let mut call_args_continuation_base_indent = 0usize;
     let mut call_args_comment_mode = false;
     let mut chain_continuation_active = false;
+    let mut switch_arrow_comment_indent_active = false;
 
     while i < tokens.len() {
         let token = tokens[i];
         match token.kind {
             TokenKind::LineComment => {
+                let arrow_comment = prev_text.as_deref() == Some("->");
                 if i > 0
                     && at_line_start
                     && out.ends_with('\n')
@@ -97,9 +99,22 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                     out.pop();
                     at_line_start = false;
                 }
+                if arrow_comment && at_line_start && !switch_arrow_comment_indent_active {
+                    indent += 2;
+                    switch_arrow_comment_indent_active = true;
+                }
                 ensure_space(&mut out, at_line_start);
                 let normalized_comment = normalize_line_comment_text(token_text(ir.source, token));
-                let current_indent = active_indent(indent, &block_stack);
+                let mut current_indent = active_indent(indent, &block_stack);
+                let next = next_symbol_text(tokens.as_slice(), i + 1, ir.source);
+                if at_line_start
+                    && block_stack.last().is_some_and(|frame| {
+                        frame.kind == BlockKind::Switch && frame.in_switch_case
+                    })
+                    && matches!(next.as_deref(), Some("case" | "default"))
+                {
+                    current_indent = current_indent.saturating_sub(1);
+                }
                 write_with_indent(
                     &mut out,
                     &mut at_line_start,
@@ -108,6 +123,10 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                 );
                 out.push('\n');
                 at_line_start = true;
+                if arrow_comment && !switch_arrow_comment_indent_active {
+                    indent += 2;
+                    switch_arrow_comment_indent_active = true;
+                }
                 prev_text = Some(String::from("//"));
                 prev_kind = Some(TokenKind::LineComment);
                 i += 1;
@@ -179,8 +198,22 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                                     current_indent,
                                     ":",
                                 );
-                                out.push('\n');
-                                at_line_start = true;
+                                let inline_line_comment =
+                                    tokens.get(i + consumed).is_some_and(|next| {
+                                        next.kind == TokenKind::LineComment
+                                            && !source_gap_has_newline(
+                                                ir.source,
+                                                label_token.end,
+                                                next.start,
+                                            )
+                                    });
+                                if inline_line_comment {
+                                    out.push(' ');
+                                    at_line_start = false;
+                                } else {
+                                    out.push('\n');
+                                    at_line_start = true;
+                                }
                                 if let Some(frame) = block_stack.last_mut() {
                                     frame.in_switch_case = true;
                                 }
@@ -197,7 +230,21 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                                     current_indent,
                                     "->",
                                 );
-                                out.push(' ');
+                                let multiline_line_comment =
+                                    tokens.get(i + consumed).is_some_and(|next| {
+                                        next.kind == TokenKind::LineComment
+                                            && source_gap_has_newline(
+                                                ir.source,
+                                                label_token.end,
+                                                next.start,
+                                            )
+                                    });
+                                if multiline_line_comment {
+                                    out.push('\n');
+                                    at_line_start = true;
+                                } else {
+                                    out.push(' ');
+                                }
                                 prev_text = Some(String::from("->"));
                                 prev_kind = Some(TokenKind::Symbol);
                                 i += consumed;
@@ -459,6 +506,13 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                             out.push('\n');
                             at_line_start = true;
                             indent += 1;
+                            if matches!(kind, BlockKind::TypeBody | BlockKind::EnumBody)
+                                && tokens.get(i + consumed).is_some_and(|next| {
+                                    source_gap_has_blank_line(ir.source, token.end, next.start)
+                                })
+                            {
+                                out.push('\n');
+                            }
                         }
                     }
                     "}" => {
@@ -523,6 +577,10 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                         pending_enum_block = false;
                         pending_module_block = false;
                         generic_depth = 0;
+                        if switch_arrow_comment_indent_active {
+                            indent = indent.saturating_sub(2);
+                            switch_arrow_comment_indent_active = false;
+                        }
                         if paren_depth == 0 {
                             ternary_depth = 0;
                             chain_continuation_active = false;
@@ -559,13 +617,18 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                             let in_module_body = block_stack
                                 .last()
                                 .is_some_and(|frame| frame.kind == BlockKind::ModuleBody);
+                            let has_blank_line_before_next =
+                                tokens.get(i + consumed).is_some_and(|next| {
+                                    source_gap_has_blank_line(ir.source, token.end, next.start)
+                                });
                             if in_type_body
-                                && next_text.as_deref() != Some("}")
-                                && next_member_looks_like_method(
-                                    tokens.as_slice(),
-                                    i + consumed,
-                                    ir.source,
-                                )
+                                && (has_blank_line_before_next
+                                    || (next_text.as_deref() != Some("}")
+                                        && next_member_looks_like_method(
+                                            tokens.as_slice(),
+                                            i + consumed,
+                                            ir.source,
+                                        )))
                             {
                                 out.push('\n');
                             }
@@ -1904,6 +1967,10 @@ fn source_gap_has_newline(source: &str, start: usize, end: usize) -> bool {
     source[start..end].contains('\n')
 }
 
+fn source_gap_has_blank_line(source: &str, start: usize, end: usize) -> bool {
+    source[start..end].matches('\n').count() >= 2
+}
+
 fn normalize_line_comment_text(text: &str) -> String {
     if let Some(content) = text.strip_prefix("//")
         && !content.is_empty()
@@ -2355,6 +2422,34 @@ mod tests {
         assert!(printed.text.contains("g(\n"));
         assert!(printed.text.contains("/* a= */ 1,\n"));
         assert!(printed.text.contains("h(/* xs...= */ null);"));
+    }
+
+    #[test]
+    fn preserves_switch_comments_around_labels() {
+        let source = "class A{int f(String v){return switch(v){case \"one\"->//x\n1;case \"two\"://y\n2;default->0;};}int g(String v){switch(v){case \"one\":return 1;//z\ncase \"two\":return 2;default:return 0;}}}";
+        let lexed = lexer::lex(source);
+        let cst = parser::parse(&lexed);
+        let attachments = comments::attach(&cst, &lexed);
+        let ir = ir::build(&cst, attachments);
+        let printed = print(&ir);
+        assert!(printed.text.contains("case \"one\" -> // x\n          1;"));
+        assert!(printed.text.contains("case \"two\": // y\n        2;"));
+        assert!(printed.text.contains("// z\n      case \"two\":"));
+    }
+
+    #[test]
+    fn preserves_blank_lines_between_fields_from_source() {
+        let source =
+            "class A{\n\nint a=1;\nint b=1;\n\nint c=1;\n/** Javadoc */\nint d=1;\n\nint e=1;\n\n}";
+        let lexed = lexer::lex(source);
+        let cst = parser::parse(&lexed);
+        let attachments = comments::attach(&cst, &lexed);
+        let ir = ir::build(&cst, attachments);
+        let printed = print(&ir);
+        assert!(printed.text.starts_with("class A {\n\n  int a = 1;"));
+        assert!(printed.text.contains("int b = 1;\n\n  int c = 1;"));
+        assert!(printed.text.contains("int d = 1;\n\n  int e = 1;"));
+        assert!(printed.text.contains("int e = 1;\n\n}\n"));
     }
 
     #[test]
