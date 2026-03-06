@@ -86,6 +86,7 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
     let mut call_args_continuation_paren_depth = 0usize;
     let mut call_args_continuation_base_indent = 0usize;
     let mut call_args_comment_mode = false;
+    let mut call_args_vertical_mode = false;
     let mut chain_continuation_active = false;
     let mut switch_arrow_comment_indent_active = false;
 
@@ -634,6 +635,7 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                                 call_args_continuation_active = false;
                                 call_args_continuation_paren_depth = 0;
                                 call_args_comment_mode = false;
+                                call_args_vertical_mode = false;
                             }
                         }
                         if paren_depth == 0 {
@@ -763,6 +765,7 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                         let call_args_comma = call_args_continuation_active
                             && paren_depth == call_args_continuation_paren_depth
                             && (call_args_comment_mode
+                                || call_args_vertical_mode
                                 || current_output_line(out.as_str())
                                     .is_some_and(|line| line.chars().count() >= 60));
                         if enum_constants_comma
@@ -837,6 +840,11 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                                     i + consumed,
                                     ir.source,
                                 );
+                                call_args_vertical_mode = should_force_vertical_call_arguments(
+                                    tokens.as_slice(),
+                                    i + consumed,
+                                    ir.source,
+                                );
                                 indent += 2;
                             }
                         }
@@ -875,6 +883,7 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                             call_args_continuation_active = false;
                             call_args_continuation_paren_depth = 0;
                             call_args_comment_mode = false;
+                            call_args_vertical_mode = false;
                         }
                     }
                     "." | "[" | "]" | "::" => {
@@ -1426,57 +1435,165 @@ fn should_break_annotation_arguments(tokens: &[&Token], mut index: usize, source
 
 fn should_break_call_arguments(tokens: &[&Token], index: usize, source: &str) -> bool {
     call_arguments_break_metrics(tokens, index, source)
-        .is_some_and(|(scanned_chars, comma_count)| scanned_chars >= 30 && comma_count >= 1)
+        .is_some_and(|metrics| metrics.scanned_chars >= 30 && metrics.top_level_comma_count >= 1)
 }
 
 fn should_break_long_call_arguments(tokens: &[&Token], index: usize, source: &str) -> bool {
     call_arguments_break_metrics(tokens, index, source)
-        .is_some_and(|(scanned_chars, comma_count)| scanned_chars >= 60 && comma_count >= 1)
+        .is_some_and(|metrics| metrics.scanned_chars >= 60 && metrics.top_level_comma_count >= 1)
+}
+
+fn should_force_vertical_call_arguments(tokens: &[&Token], index: usize, source: &str) -> bool {
+    call_arguments_break_metrics(tokens, index, source).is_some_and(|metrics| {
+        (metrics.saw_top_level_newline && metrics.max_input_line_args > 2)
+            || metrics.first_arg_has_call
+            || metrics.top_level_call_arg_count >= 2
+    })
 }
 
 fn call_arguments_break_metrics(
     tokens: &[&Token],
     mut index: usize,
     source: &str,
-) -> Option<(usize, usize)> {
+) -> Option<CallArgumentMetrics> {
     let mut local_paren_depth = 0usize;
     let mut local_bracket_depth = 0usize;
     let mut local_brace_depth = 0usize;
     let mut scanned_chars = 0usize;
     let mut top_level_comma_count = 0usize;
+    let mut top_level_call_arg_count = 0usize;
+    let mut first_arg_has_call = false;
+    let mut current_arg_has_call = false;
+    let mut current_input_line_args = 1usize;
+    let mut max_input_line_args = 1usize;
+    let mut saw_any_argument_token = false;
+    let mut saw_first_arg = false;
+    let mut saw_top_level_newline = false;
 
     while index < tokens.len() {
         let token = tokens[index];
         scanned_chars += token.end.saturating_sub(token.start);
         if token.kind == TokenKind::Symbol {
             let (symbol, consumed) = read_symbol(tokens, index, source);
+            let next_index = index + consumed;
+            let token_end = tokens[next_index - 1].end;
+            let top_level_newline_after = next_index < tokens.len()
+                && local_paren_depth == 0
+                && local_bracket_depth == 0
+                && local_brace_depth == 0
+                && source_gap_has_newline(source, token_end, tokens[next_index].start);
             match symbol {
-                "(" => local_paren_depth += 1,
+                "(" => {
+                    saw_any_argument_token = true;
+                    if local_paren_depth == 0 && local_bracket_depth == 0 && local_brace_depth == 0
+                    {
+                        current_arg_has_call = true;
+                    }
+                    local_paren_depth += 1;
+                }
                 ")" => {
                     if local_paren_depth == 0 {
+                        if saw_any_argument_token {
+                            if !saw_first_arg {
+                                first_arg_has_call = current_arg_has_call;
+                            }
+                            if current_arg_has_call {
+                                top_level_call_arg_count += 1;
+                            }
+                            max_input_line_args = max_input_line_args.max(current_input_line_args);
+                        }
                         break;
                     }
                     local_paren_depth -= 1;
                 }
-                "[" => local_bracket_depth += 1,
-                "]" => local_bracket_depth = local_bracket_depth.saturating_sub(1),
-                "{" => local_brace_depth += 1,
-                "}" => local_brace_depth = local_brace_depth.saturating_sub(1),
+                "[" => {
+                    saw_any_argument_token = true;
+                    local_bracket_depth += 1;
+                }
+                "]" => {
+                    saw_any_argument_token = true;
+                    local_bracket_depth = local_bracket_depth.saturating_sub(1);
+                }
+                "{" => {
+                    saw_any_argument_token = true;
+                    local_brace_depth += 1;
+                }
+                "}" => {
+                    saw_any_argument_token = true;
+                    local_brace_depth = local_brace_depth.saturating_sub(1);
+                }
                 "," if local_paren_depth == 0
                     && local_bracket_depth == 0
                     && local_brace_depth == 0 =>
                 {
                     top_level_comma_count += 1;
+                    if !saw_first_arg {
+                        first_arg_has_call = current_arg_has_call;
+                        saw_first_arg = true;
+                    }
+                    if current_arg_has_call {
+                        top_level_call_arg_count += 1;
+                    }
+                    current_arg_has_call = false;
+                    if top_level_newline_after {
+                        saw_top_level_newline = true;
+                        max_input_line_args = max_input_line_args.max(current_input_line_args);
+                        current_input_line_args = 1;
+                    } else {
+                        current_input_line_args += 1;
+                    }
                 }
-                _ => {}
+                _ => saw_any_argument_token = true,
             }
-            index += consumed;
+            if next_index < tokens.len()
+                && local_paren_depth == 0
+                && local_bracket_depth == 0
+                && local_brace_depth == 0
+                && top_level_newline_after
+                && !(symbol == ","
+                    && local_paren_depth == 0
+                    && local_bracket_depth == 0
+                    && local_brace_depth == 0)
+            {
+                saw_top_level_newline = true;
+                max_input_line_args = max_input_line_args.max(current_input_line_args);
+                current_input_line_args = 1;
+            }
+            index = next_index;
         } else {
-            index += 1;
+            saw_any_argument_token = true;
+            let next_index = index + 1;
+            if next_index < tokens.len()
+                && local_paren_depth == 0
+                && local_bracket_depth == 0
+                && local_brace_depth == 0
+                && source_gap_has_newline(source, token.end, tokens[next_index].start)
+            {
+                saw_top_level_newline = true;
+                max_input_line_args = max_input_line_args.max(current_input_line_args);
+                current_input_line_args = 1;
+            }
+            index = next_index;
         }
     }
 
-    Some((scanned_chars, top_level_comma_count))
+    Some(CallArgumentMetrics {
+        scanned_chars,
+        top_level_comma_count,
+        top_level_call_arg_count,
+        first_arg_has_call,
+        max_input_line_args,
+        saw_top_level_newline,
+    })
+}
+
+struct CallArgumentMetrics {
+    scanned_chars: usize,
+    top_level_comma_count: usize,
+    top_level_call_arg_count: usize,
+    first_arg_has_call: bool,
+    max_input_line_args: usize,
+    saw_top_level_newline: bool,
 }
 
 fn should_keep_inline_annotation(
@@ -2656,6 +2773,35 @@ mod tests {
         let printed = print(&ir);
         assert!(printed.text.contains("g(\n"));
         assert!(printed.text.contains(",\n"));
+    }
+
+    #[test]
+    fn forces_vertical_call_arguments_for_leading_or_multiple_calls() {
+        let source = "class A{void f(){g(xxxxxxxxxxxxxxxxxxxxxxx(),xxxxxxxxxxxxxxxxxxxxxxxxx,xxxxxxxxxxxxxxxxxxxxxxxxx,xxxxxxxxxxxxxxxxxxxxxxxxx,xxxxxxxxxxxxxxxxxxxxxxxxx,xxxxxxxxxxxxxxxxxxxxxxxxx,xxxxxxxxxxxxxxxxxxxxxxxxx,xxxxxxxxxxxxxxxxxxxxxxxxx);h(xxxxxxxxxxxxxxxxxxxxxxxxx,xxxxxxxxxxxxxxxxxxxxxxx(),xxxxxxxxxxxxxxxxxxxxxxxxx,xxxxxxxxxxxxxxxxxxxxxxx(),xxxxxxxxxxxxxxxxxxxxxxxxx,xxxxxxxxxxxxxxxxxxxxxxxxx,xxxxxxxxxxxxxxxxxxxxxxxxx,xxxxxxxxxxxxxxxxxxxxxxxxx);}}";
+        let lexed = lexer::lex(source);
+        let cst = parser::parse(&lexed);
+        let attachments = comments::attach(&cst, &lexed);
+        let ir = ir::build(&cst, attachments);
+        let printed = print(&ir);
+        assert!(printed.text.contains(
+            "g(\n        xxxxxxxxxxxxxxxxxxxxxxx(),\n        xxxxxxxxxxxxxxxxxxxxxxxxx,"
+        ));
+        assert!(printed.text.contains(
+            "h(\n        xxxxxxxxxxxxxxxxxxxxxxxxx,\n        xxxxxxxxxxxxxxxxxxxxxxx(),"
+        ));
+    }
+
+    #[test]
+    fn forces_vertical_call_arguments_for_dense_broken_input_lines() {
+        let source = "class A{void f(){g(\nxxxxxxxxxxxxxxxxxxxxxxxxx,xxxxxxxxxxxxxxxxxxxxxxxxx,xxxxxxxxxxxxxxxxxxxxxxxxx,xxxxxxxxxxxxxxxxxxxxxxxxx,\nxxxxxxxxxxxxxxxxxxxxxxxxx,xxxxxxxxxxxxxxxxxxxxxxxxx,xxxxxxxxxxxxxxxxxxxxxxxxx,xxxxxxxxxxxxxxxxxxxxxxxxx);}}";
+        let lexed = lexer::lex(source);
+        let cst = parser::parse(&lexed);
+        let attachments = comments::attach(&cst, &lexed);
+        let ir = ir::build(&cst, attachments);
+        let printed = print(&ir);
+        assert!(printed.text.contains(
+            "g(\n        xxxxxxxxxxxxxxxxxxxxxxxxx,\n        xxxxxxxxxxxxxxxxxxxxxxxxx,"
+        ));
     }
 
     #[test]
