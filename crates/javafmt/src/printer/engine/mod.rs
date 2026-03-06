@@ -19,6 +19,7 @@ enum BlockKind {
     TypeBody,
     EnumBody,
     ModuleBody,
+    Initializer,
     Inline,
 }
 
@@ -58,6 +59,7 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
     let mut indent = 0usize;
     let mut at_line_start = true;
     let mut paren_depth = 0usize;
+    let mut bracket_depth = 0usize;
     let mut block_stack: Vec<BlockFrame> = Vec::new();
     let mut prev_text: Option<String> = None;
     let mut prev_kind: Option<TokenKind> = None;
@@ -94,6 +96,10 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
     let mut call_args_comment_mode = false;
     let mut call_args_vertical_mode = false;
     let mut chain_continuation_active = false;
+    let mut chain_continuation_paren_depth = 0usize;
+    let mut chain_continuation_bracket_depth = 0usize;
+    let mut chain_continuation_dot_count = 0usize;
+    let mut chain_keep_leading_dots = 0usize;
     let mut switch_arrow_comment_indent_active = false;
 
     while i < tokens.len() {
@@ -102,6 +108,10 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
             TokenKind::LineComment => {
                 annotation_inline_run_active = false;
                 let arrow_comment = prev_text.as_deref() == Some("->");
+                let initializer_comment = prev_text.as_deref() == Some(",")
+                    && block_stack
+                        .last()
+                        .is_some_and(|frame| frame.kind == BlockKind::Initializer);
                 if i > 0
                     && at_line_start
                     && out.ends_with('\n')
@@ -110,6 +120,10 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                 {
                     out.pop();
                     at_line_start = false;
+                }
+                if initializer_comment && !at_line_start {
+                    out.push('\n');
+                    at_line_start = true;
                 }
                 if arrow_comment && at_line_start && !switch_arrow_comment_indent_active {
                     indent += 2;
@@ -366,9 +380,14 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                 prev_text = Some(word.to_owned());
                 prev_kind = Some(TokenKind::Word);
                 if word == "return"
-                    && has_chained_call_continuation(tokens.as_slice(), i + 1, ir.source)
+                    && let Some(metrics) =
+                        chain_continuation_metrics(tokens.as_slice(), i + 1, ir.source)
                 {
                     chain_continuation_active = true;
+                    chain_continuation_paren_depth = paren_depth;
+                    chain_continuation_bracket_depth = bracket_depth;
+                    chain_continuation_dot_count = 0;
+                    chain_keep_leading_dots = metrics.keep_leading_dots;
                 }
                 if word == "switch" {
                     pending_switch_block = true;
@@ -523,6 +542,7 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                         }
 
                         let is_empty = next_text.as_deref() == Some("}");
+                        let initializer_brace = matches!(prev_text.as_deref(), Some("]" | "="));
                         let inline_brace = (is_inline_initializer_brace(
                             tokens.as_slice(),
                             i,
@@ -541,6 +561,8 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                             BlockKind::TypeBody
                         } else if inline_brace {
                             BlockKind::Inline
+                        } else if initializer_brace {
+                            BlockKind::Initializer
                         } else {
                             BlockKind::Normal
                         };
@@ -636,6 +658,10 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                         if paren_depth == 0 {
                             ternary_depth = 0;
                             chain_continuation_active = false;
+                            chain_continuation_paren_depth = 0;
+                            chain_continuation_bracket_depth = 0;
+                            chain_continuation_dot_count = 0;
+                            chain_keep_leading_dots = 0;
                             if call_args_continuation_active {
                                 indent = call_args_continuation_base_indent;
                                 call_args_continuation_active = false;
@@ -664,6 +690,11 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                         if paren_depth == 0 {
                             out.push('\n');
                             at_line_start = true;
+                            if tokens.get(i + consumed).is_some_and(|next| {
+                                source_gap_has_blank_line(ir.source, token.end, next.start)
+                            }) {
+                                out.push('\n');
+                            }
                             let in_type_body = block_stack.last().is_some_and(|frame| {
                                 matches!(frame.kind, BlockKind::TypeBody | BlockKind::EnumBody)
                             });
@@ -770,6 +801,9 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                             && annotation_brace_depth == 0;
                         let call_args_comma = call_args_continuation_active
                             && paren_depth == call_args_continuation_paren_depth
+                            && block_stack
+                                .last()
+                                .is_none_or(|frame| frame.kind != BlockKind::Initializer)
                             && (call_args_comment_mode
                                 || call_args_vertical_mode
                                 || current_output_line(out.as_str())
@@ -818,6 +852,8 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                                     .as_ref()
                                     .is_some_and(CallArgumentMetrics::should_break_long)
                         };
+                        let dot_continuation_call = current_output_line(out.as_str())
+                            .is_some_and(|line| line.trim_start().starts_with('.'));
                         paren_depth += 1;
                         if prev_text.as_deref() == Some("try") {
                             try_resource_paren_depth = paren_depth;
@@ -853,11 +889,11 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                                 call_args_continuation_base_indent = indent;
                                 call_args_comment_mode = call_argument_metrics
                                     .as_ref()
-                                    .is_some_and(CallArgumentMetrics::has_block_comment);
+                                    .is_some_and(CallArgumentMetrics::has_comment);
                                 call_args_vertical_mode = call_argument_metrics
                                     .as_ref()
                                     .is_some_and(CallArgumentMetrics::should_force_vertical);
-                                indent += 2;
+                                indent += if dot_continuation_call { 4 } else { 2 };
                             }
                         }
                     }
@@ -899,17 +935,34 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                         }
                     }
                     "." | "[" | "]" | "::" => {
-                        if symbol == "."
-                            && (lambda_continuation_active || chain_continuation_active)
+                        let top_level_chain_dot = symbol == "."
+                            && chain_continuation_active
+                            && paren_depth == chain_continuation_paren_depth
+                            && bracket_depth == chain_continuation_bracket_depth;
+                        if top_level_chain_dot {
+                            if chain_continuation_dot_count >= chain_keep_leading_dots {
+                                out.push('\n');
+                                at_line_start = true;
+                            }
+                            chain_continuation_dot_count += 1;
+                        } else if symbol == "."
                             && prev_text.as_deref() == Some(")")
-                            && should_break_before_chained_dot(out.as_str())
+                            && (((lambda_continuation_active || chain_continuation_active)
+                                && should_break_before_chained_dot(out.as_str()))
+                                || next_dotted_member_call_breaks(
+                                    tokens.as_slice(),
+                                    i + consumed,
+                                    ir.source,
+                                ))
                         {
                             out.push('\n');
                             at_line_start = true;
                         }
                         let current_indent = active_indent(indent, &block_stack);
                         let extra_indent = if symbol == "."
-                            && (lambda_continuation_active || chain_continuation_active)
+                            && (lambda_continuation_active
+                                || chain_continuation_active
+                                || prev_text.as_deref() == Some(")"))
                             && at_line_start
                         {
                             2
@@ -922,6 +975,11 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                             current_indent + extra_indent,
                             &symbol,
                         );
+                        if symbol == "[" {
+                            bracket_depth += 1;
+                        } else if symbol == "]" {
+                            bracket_depth = bracket_depth.saturating_sub(1);
+                        }
                     }
                     "++" | "--" => {
                         let current_indent = active_indent(indent, &block_stack);
@@ -962,12 +1020,16 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                         {
                             out.push('\n');
                             at_line_start = true;
-                            if has_chained_call_continuation(
+                            if let Some(metrics) = chain_continuation_metrics(
                                 tokens.as_slice(),
                                 i + consumed,
                                 ir.source,
                             ) {
                                 chain_continuation_active = true;
+                                chain_continuation_paren_depth = paren_depth;
+                                chain_continuation_bracket_depth = bracket_depth;
+                                chain_continuation_dot_count = 0;
+                                chain_keep_leading_dots = metrics.keep_leading_dots;
                             }
                             if !lambda_continuation_active {
                                 lambda_continuation_active = true;

@@ -360,4 +360,27 @@ mod tests {
         let expected = "package p;\n\nimport static java.util.Collections.emptyList;\n\nimport java.util.List;\n\nclass A {}\n";
         assert_eq!(reorder_top_level_imports(input.to_owned()), expected);
     }
+
+    #[test]
+    fn matches_upstream_optional_chain_wrapping_case() {
+        let input = include_str!("../../../fixtures/upstream-gjf/1.34.1/testdata/B124394008.input");
+        let expected =
+            include_str!("../../../fixtures/upstream-gjf/1.34.1/testdata/B124394008.output");
+        assert_eq!(format_str(input).output, expected);
+    }
+
+    #[test]
+    fn matches_upstream_then_return_array_wrapping_case() {
+        let input = include_str!("../../../fixtures/upstream-gjf/1.34.1/testdata/B20531711.input");
+        let expected =
+            include_str!("../../../fixtures/upstream-gjf/1.34.1/testdata/B20531711.output");
+        assert_eq!(format_str(input).output, expected);
+    }
+
+    #[test]
+    fn breaks_long_field_chain_assignment_like_gjf() {
+        let input = "class A{void f(){this.overflowContactCompositeSupportedRenderers=this.getSharePanelResponse.contents.unifiedSharePanelRenderer.contents[0].connectionSection.connectionsOverflowMenu.connectionsOverflowMenuRenderer.contents[0].overflowConnectionSectionRenderer.contacts[0];}}";
+        let expected = "class A {\n  void f() {\n    this.overflowContactCompositeSupportedRenderers =\n        this.getSharePanelResponse\n            .contents\n            .unifiedSharePanelRenderer\n            .contents[0]\n            .connectionSection\n            .connectionsOverflowMenu\n            .connectionsOverflowMenuRenderer\n            .contents[0]\n            .overflowConnectionSectionRenderer\n            .contacts[0];\n  }\n}\n";
+        assert_eq!(format_str(input).output, expected);
+    }
 }

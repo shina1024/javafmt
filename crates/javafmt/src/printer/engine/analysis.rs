@@ -138,28 +138,56 @@ pub(super) fn starts_block_lambda_rhs(tokens: &[&Token], mut index: usize, sourc
     false
 }
 
-pub(super) fn has_chained_call_continuation(
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct ChainContinuationMetrics {
+    pub keep_leading_dots: usize,
+}
+
+pub(super) fn chain_continuation_metrics(
     tokens: &[&Token],
     mut index: usize,
     source: &str,
-) -> bool {
+) -> Option<ChainContinuationMetrics> {
     let mut local_paren_depth = 0usize;
     let mut local_bracket_depth = 0usize;
+    let mut scanned_chars = 0usize;
+    let mut top_level_dot_count = 0usize;
     let mut dot_after_call_count = 0usize;
+    let mut keep_leading_dots = 0usize;
+    let mut first_top_level_call_dot = 0usize;
+    let mut saw_top_level_method_call = false;
 
     while index < tokens.len() {
         let token = tokens[index];
+        scanned_chars += token.end.saturating_sub(token.start);
         if token.kind == TokenKind::Symbol {
             let (symbol, consumed) = read_symbol(tokens, index, source);
             match symbol {
                 ";" if local_paren_depth == 0 && local_bracket_depth == 0 => break,
-                "(" => local_paren_depth += 1,
+                "(" => {
+                    if local_paren_depth == 0 && local_bracket_depth == 0 {
+                        saw_top_level_method_call = true;
+                    }
+                    local_paren_depth += 1;
+                }
                 ")" => local_paren_depth = local_paren_depth.saturating_sub(1),
                 "[" => local_bracket_depth += 1,
                 "]" => local_bracket_depth = local_bracket_depth.saturating_sub(1),
                 "." if local_paren_depth == 0 && local_bracket_depth == 0 => {
+                    top_level_dot_count += 1;
+                    let member_call_name =
+                        next_chain_member_call_name(tokens, index + consumed, source);
+                    if first_top_level_call_dot == 0 && member_call_name.is_some() {
+                        first_top_level_call_dot = top_level_dot_count;
+                    }
                     if index > 0 && token_text(source, tokens[index - 1]) == ")" {
                         dot_after_call_count += 1;
+                    }
+                    if top_level_dot_count <= 2
+                        && let Some(member_name) = member_call_name
+                        && is_chain_prefix_method(member_name)
+                    {
+                        keep_leading_dots = top_level_dot_count;
                     }
                 }
                 _ => {}
@@ -170,7 +198,17 @@ pub(super) fn has_chained_call_continuation(
         }
     }
 
-    dot_after_call_count >= 1
+    let long_member_chain =
+        top_level_dot_count >= 5 && scanned_chars >= 80 && !saw_top_level_method_call;
+    if keep_leading_dots == 0 && first_top_level_call_dot >= 2 {
+        keep_leading_dots = first_top_level_call_dot;
+    }
+    if long_member_chain && keep_leading_dots == 0 {
+        keep_leading_dots = 1;
+    }
+
+    (dot_after_call_count >= 1 || long_member_chain)
+        .then_some(ChainContinuationMetrics { keep_leading_dots })
 }
 
 pub(super) fn should_break_annotation_arguments(
@@ -232,13 +270,14 @@ pub(super) fn call_arguments_break_metrics(
     let mut saw_any_argument_token = false;
     let mut saw_first_arg = false;
     let mut saw_top_level_newline = false;
-    let mut has_block_comment = false;
+    let mut has_comment = false;
+    let mut has_top_level_initializer = false;
 
     while index < tokens.len() {
         let token = tokens[index];
         scanned_chars += token.end.saturating_sub(token.start);
-        if token.kind == TokenKind::BlockComment {
-            has_block_comment = true;
+        if matches!(token.kind, TokenKind::BlockComment | TokenKind::LineComment) {
+            has_comment = true;
         }
         if token.kind == TokenKind::Symbol {
             let (symbol, consumed) = read_symbol(tokens, index, source);
@@ -283,6 +322,10 @@ pub(super) fn call_arguments_break_metrics(
                 }
                 "{" => {
                     saw_any_argument_token = true;
+                    if local_paren_depth == 0 && local_bracket_depth == 0 && local_brace_depth == 0
+                    {
+                        has_top_level_initializer = true;
+                    }
                     local_brace_depth += 1;
                 }
                 "}" => {
@@ -351,7 +394,8 @@ pub(super) fn call_arguments_break_metrics(
         first_arg_has_call,
         max_input_line_args,
         saw_top_level_newline,
-        has_block_comment,
+        has_comment,
+        has_top_level_initializer,
     })
 }
 
@@ -362,26 +406,30 @@ pub(super) struct CallArgumentMetrics {
     first_arg_has_call: bool,
     max_input_line_args: usize,
     saw_top_level_newline: bool,
-    has_block_comment: bool,
+    has_comment: bool,
+    has_top_level_initializer: bool,
 }
 
 impl CallArgumentMetrics {
     pub(super) fn should_break_short(&self) -> bool {
-        self.scanned_chars >= 30 && self.top_level_comma_count >= 1
+        self.has_top_level_initializer
+            || (self.scanned_chars >= 30 && self.top_level_comma_count >= 1)
     }
 
     pub(super) fn should_break_long(&self) -> bool {
-        self.scanned_chars >= 60 && self.top_level_comma_count >= 1
+        self.has_top_level_initializer
+            || (self.scanned_chars >= 60 && self.top_level_comma_count >= 1)
     }
 
     pub(super) fn should_force_vertical(&self) -> bool {
-        (self.saw_top_level_newline && self.max_input_line_args > 2)
+        self.has_top_level_initializer
+            || (self.saw_top_level_newline && self.max_input_line_args > 2)
             || self.first_arg_has_call
             || self.top_level_call_arg_count >= 2
     }
 
-    pub(super) fn has_block_comment(&self) -> bool {
-        self.has_block_comment
+    pub(super) fn has_comment(&self) -> bool {
+        self.has_comment
     }
 }
 
@@ -676,6 +724,7 @@ pub(super) fn should_break_assignment_rhs(
 
     let mut local_paren_depth = 0usize;
     let mut local_bracket_depth = 0usize;
+    let mut top_level_dot_count = 0usize;
     let mut dot_after_call_count = 0usize;
     let mut scanned_chars = 0usize;
     let mut saw_sorted_call = false;
@@ -705,6 +754,7 @@ pub(super) fn should_break_assignment_rhs(
                     saw_top_level_angle = true;
                 }
                 "." if local_paren_depth == 0 && local_bracket_depth == 0 => {
+                    top_level_dot_count += 1;
                     if index > 0 && token_text(source, tokens[index - 1]) == ")" {
                         dot_after_call_count += 1;
                     }
@@ -720,7 +770,8 @@ pub(super) fn should_break_assignment_rhs(
     let sorted_chain = dot_after_call_count >= 4 && scanned_chars >= 60 && saw_sorted_call;
     let long_call_chain = dot_after_call_count >= 3 && scanned_chars >= 90;
     let long_generic_call = scanned_chars >= 90 && saw_top_level_method_call && saw_top_level_angle;
-    sorted_chain || long_call_chain || long_generic_call
+    let long_member_chain = top_level_dot_count >= 5 && scanned_chars >= 80;
+    sorted_chain || long_call_chain || long_generic_call || long_member_chain
 }
 
 pub(super) fn next_member_looks_like_method(
@@ -1012,9 +1063,16 @@ pub(super) fn is_inline_initializer_brace(
     }
 
     let mut depth = 0usize;
+    let mut scanned_chars = 0usize;
+    let mut top_level_comma_count = 0usize;
+    let mut has_comment = false;
     let mut i = index;
     while i < tokens.len() {
         let token = tokens[i];
+        scanned_chars += token.end.saturating_sub(token.start);
+        if matches!(token.kind, TokenKind::LineComment | TokenKind::BlockComment) {
+            has_comment = true;
+        }
         if token.kind != TokenKind::Symbol {
             i += 1;
             continue;
@@ -1025,9 +1083,10 @@ pub(super) fn is_inline_initializer_brace(
             "}" => {
                 depth = depth.saturating_sub(1);
                 if depth == 0 {
-                    return true;
+                    return !has_comment && top_level_comma_count <= 2 && scanned_chars <= 40;
                 }
             }
+            "," if depth == 1 => top_level_comma_count += 1,
             ";" if depth == 1 => return false,
             _ => {}
         }
@@ -1057,6 +1116,90 @@ pub(super) fn should_break_before_chained_dot(out: &str) -> bool {
         return true;
     }
     line.chars().filter(|ch| *ch == '.').count() >= 2
+}
+
+pub(super) fn next_dotted_member_call_breaks(
+    tokens: &[&Token],
+    mut index: usize,
+    source: &str,
+) -> bool {
+    while index < tokens.len() {
+        let token = tokens[index];
+        match token.kind {
+            TokenKind::Word => {
+                index += 1;
+                break;
+            }
+            TokenKind::Symbol => {
+                let (symbol, consumed) = read_symbol(tokens, index, source);
+                if symbol != "<" {
+                    return false;
+                }
+                index += consumed;
+            }
+            _ => index += 1,
+        }
+    }
+
+    while index < tokens.len() {
+        let token = tokens[index];
+        if token.kind != TokenKind::Symbol {
+            index += 1;
+            continue;
+        }
+        let (symbol, consumed) = read_symbol(tokens, index, source);
+        if symbol != "(" {
+            return false;
+        }
+        return call_arguments_break_metrics(tokens, index + consumed, source).is_some_and(
+            |metrics| {
+                metrics.should_break_short()
+                    || metrics.should_break_long()
+                    || metrics.should_force_vertical()
+                    || metrics.has_comment()
+            },
+        );
+    }
+
+    false
+}
+
+fn next_chain_member_call_name<'a>(
+    tokens: &[&Token],
+    mut index: usize,
+    source: &'a str,
+) -> Option<&'a str> {
+    let mut member_name = None;
+    while index < tokens.len() {
+        let token = tokens[index];
+        match token.kind {
+            TokenKind::Word => {
+                if member_name.is_none() {
+                    member_name = Some(token_text(source, token));
+                    index += 1;
+                    continue;
+                }
+                return None;
+            }
+            TokenKind::Symbol => {
+                let (symbol, consumed) = read_symbol(tokens, index, source);
+                match symbol {
+                    "<" => {
+                        index += consumed;
+                        continue;
+                    }
+                    "(" => return member_name,
+                    _ => return None,
+                }
+            }
+            _ => index += 1,
+        }
+    }
+    None
+}
+
+fn is_chain_prefix_method(name: &str) -> bool {
+    matches!(name, "stream" | "parallelStream" | "toBuilder")
 }
 
 pub(super) fn current_output_line(out: &str) -> Option<&str> {
