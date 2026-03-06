@@ -81,6 +81,7 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
     let mut call_args_continuation_active = false;
     let mut call_args_continuation_paren_depth = 0usize;
     let mut call_args_continuation_base_indent = 0usize;
+    let mut chain_continuation_active = false;
 
     while i < tokens.len() {
         let token = tokens[i];
@@ -297,6 +298,11 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                 write_with_indent(&mut out, &mut at_line_start, current_indent, word);
                 prev_text = Some(word.to_owned());
                 prev_kind = Some(TokenKind::Word);
+                if word == "return"
+                    && has_chained_call_continuation(tokens.as_slice(), i + 1, ir.source)
+                {
+                    chain_continuation_active = true;
+                }
                 if word == "switch" {
                     pending_switch_block = true;
                 }
@@ -513,6 +519,7 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                         generic_depth = 0;
                         if paren_depth == 0 {
                             ternary_depth = 0;
+                            chain_continuation_active = false;
                             if call_args_continuation_active {
                                 indent = call_args_continuation_base_indent;
                                 call_args_continuation_active = false;
@@ -638,9 +645,14 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                             && paren_depth == annotation_multiline_args_paren_depth
                             && annotation_paren_depth == 1
                             && annotation_brace_depth == 0;
+                        let call_args_comma = call_args_continuation_active
+                            && paren_depth == call_args_continuation_paren_depth
+                            && current_output_line(out.as_str())
+                                .is_some_and(|line| line.chars().count() >= 60);
                         if enum_constants_comma
                             || (module_continuation_active && paren_depth == 0)
                             || annotation_args_comma
+                            || call_args_comma
                         {
                             out.push('\n');
                             at_line_start = true;
@@ -654,13 +666,23 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                         }
                         let current_indent = active_indent(indent, &block_stack);
                         write_with_indent(&mut out, &mut at_line_start, current_indent, "(");
-                        let should_break_after_open_paren =
-                            is_explicit_type_argument_call(tokens.as_slice(), i, ir.source)
-                                && should_break_call_arguments(
-                                    tokens.as_slice(),
-                                    i + consumed,
-                                    ir.source,
-                                );
+                        let explicit_type_argument_call =
+                            is_explicit_type_argument_call(tokens.as_slice(), i, ir.source);
+                        let should_break_after_open_paren = if explicit_type_argument_call {
+                            should_break_call_arguments(tokens.as_slice(), i + consumed, ir.source)
+                        } else {
+                            is_wrappable_invocation_open_paren(
+                                tokens.as_slice(),
+                                i,
+                                ir.source,
+                                &prev_kind,
+                                prev_text.as_deref(),
+                            ) && should_break_long_call_arguments(
+                                tokens.as_slice(),
+                                i + consumed,
+                                ir.source,
+                            )
+                        };
                         paren_depth += 1;
                         if prev_text.as_deref() == Some("try") {
                             try_resource_paren_depth = paren_depth;
@@ -732,19 +754,22 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                     }
                     "." | "[" | "]" | "::" => {
                         if symbol == "."
-                            && lambda_continuation_active
+                            && (lambda_continuation_active || chain_continuation_active)
                             && prev_text.as_deref() == Some(")")
+                            && should_break_before_chained_dot(out.as_str())
                         {
                             out.push('\n');
                             at_line_start = true;
                         }
                         let current_indent = active_indent(indent, &block_stack);
-                        let extra_indent =
-                            if symbol == "." && lambda_continuation_active && at_line_start {
-                                2
-                            } else {
-                                0
-                            };
+                        let extra_indent = if symbol == "."
+                            && (lambda_continuation_active || chain_continuation_active)
+                            && at_line_start
+                        {
+                            2
+                        } else {
+                            0
+                        };
                         write_with_indent(
                             &mut out,
                             &mut at_line_start,
@@ -791,6 +816,13 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                         {
                             out.push('\n');
                             at_line_start = true;
+                            if has_chained_call_continuation(
+                                tokens.as_slice(),
+                                i + consumed,
+                                ir.source,
+                            ) {
+                                chain_continuation_active = true;
+                            }
                             if !lambda_continuation_active {
                                 lambda_continuation_active = true;
                                 lambda_continuation_base_indent = indent;
@@ -1153,6 +1185,37 @@ fn starts_block_lambda_rhs(tokens: &[&Token], mut index: usize, source: &str) ->
     false
 }
 
+fn has_chained_call_continuation(tokens: &[&Token], mut index: usize, source: &str) -> bool {
+    let mut local_paren_depth = 0usize;
+    let mut local_bracket_depth = 0usize;
+    let mut dot_after_call_count = 0usize;
+
+    while index < tokens.len() {
+        let token = tokens[index];
+        if token.kind == TokenKind::Symbol {
+            let (symbol, consumed) = read_symbol(tokens, index, source);
+            match symbol {
+                ";" if local_paren_depth == 0 && local_bracket_depth == 0 => break,
+                "(" => local_paren_depth += 1,
+                ")" => local_paren_depth = local_paren_depth.saturating_sub(1),
+                "[" => local_bracket_depth += 1,
+                "]" => local_bracket_depth = local_bracket_depth.saturating_sub(1),
+                "." if local_paren_depth == 0 && local_bracket_depth == 0 => {
+                    if index > 0 && token_text(source, tokens[index - 1]) == ")" {
+                        dot_after_call_count += 1;
+                    }
+                }
+                _ => {}
+            }
+            index += consumed;
+        } else {
+            index += 1;
+        }
+    }
+
+    dot_after_call_count >= 1
+}
+
 fn should_break_annotation_arguments(tokens: &[&Token], mut index: usize, source: &str) -> bool {
     let mut local_paren_depth = 0usize;
     let mut local_brace_depth = 0usize;
@@ -1190,7 +1253,21 @@ fn should_break_annotation_arguments(tokens: &[&Token], mut index: usize, source
     saw_top_level_equals && saw_top_level_comma
 }
 
-fn should_break_call_arguments(tokens: &[&Token], mut index: usize, source: &str) -> bool {
+fn should_break_call_arguments(tokens: &[&Token], index: usize, source: &str) -> bool {
+    call_arguments_break_metrics(tokens, index, source)
+        .is_some_and(|(scanned_chars, comma_count)| scanned_chars >= 30 && comma_count >= 1)
+}
+
+fn should_break_long_call_arguments(tokens: &[&Token], index: usize, source: &str) -> bool {
+    call_arguments_break_metrics(tokens, index, source)
+        .is_some_and(|(scanned_chars, comma_count)| scanned_chars >= 60 && comma_count >= 1)
+}
+
+fn call_arguments_break_metrics(
+    tokens: &[&Token],
+    mut index: usize,
+    source: &str,
+) -> Option<(usize, usize)> {
     let mut local_paren_depth = 0usize;
     let mut local_bracket_depth = 0usize;
     let mut local_brace_depth = 0usize;
@@ -1228,7 +1305,51 @@ fn should_break_call_arguments(tokens: &[&Token], mut index: usize, source: &str
         }
     }
 
-    scanned_chars >= 30 && top_level_comma_count >= 1
+    Some((scanned_chars, top_level_comma_count))
+}
+
+fn is_wrappable_invocation_open_paren(
+    tokens: &[&Token],
+    index: usize,
+    source: &str,
+    prev_kind: &Option<TokenKind>,
+    prev_text: Option<&str>,
+) -> bool {
+    if is_explicit_type_argument_call(tokens, index, source) {
+        return true;
+    }
+
+    if matches!(
+        prev_text,
+        Some("if" | "for" | "while" | "switch" | "catch" | "synchronized" | "try")
+    ) {
+        return false;
+    }
+
+    if !matches!(prev_kind, Some(TokenKind::Word)) && !matches!(prev_text, Some(">" | ">>" | ">>>"))
+    {
+        return false;
+    }
+
+    if index < 2 {
+        return false;
+    }
+
+    let mut cursor = index - 1;
+    while cursor > 0 {
+        cursor -= 1;
+        let token = tokens[cursor];
+        match token.kind {
+            TokenKind::Whitespace | TokenKind::Newline => continue,
+            TokenKind::Symbol => {
+                let (symbol, _) = read_symbol(tokens, cursor, source);
+                return matches!(symbol, "." | "::");
+            }
+            _ => return false,
+        }
+    }
+
+    false
 }
 
 fn is_explicit_type_argument_call(tokens: &[&Token], index: usize, source: &str) -> bool {
@@ -1313,8 +1434,9 @@ fn should_break_assignment_rhs(tokens: &[&Token], mut index: usize, source: &str
     }
 
     let sorted_chain = dot_after_call_count >= 4 && scanned_chars >= 60 && saw_sorted_call;
+    let long_call_chain = dot_after_call_count >= 3 && scanned_chars >= 90;
     let long_generic_call = scanned_chars >= 90 && saw_top_level_method_call && saw_top_level_angle;
-    sorted_chain || long_generic_call
+    sorted_chain || long_call_chain || long_generic_call
 }
 
 fn next_member_looks_like_method(tokens: &[&Token], mut index: usize, source: &str) -> bool {
@@ -1620,6 +1742,24 @@ fn is_exponent_sign_context(prev_text: Option<&str>, next_text: Option<&str>) ->
 
     let ends_with_exponent = prev.ends_with('e') || prev.ends_with('E');
     ends_with_exponent && next.chars().all(|ch| ch.is_ascii_digit() || ch == '_')
+}
+
+fn should_break_before_chained_dot(out: &str) -> bool {
+    let Some(line) = current_output_line(out) else {
+        return false;
+    };
+    let trimmed = line.trim_start();
+    if trimmed.starts_with('.') || trimmed.starts_with("return ") {
+        return true;
+    }
+    line.chars().filter(|ch| *ch == '.').count() >= 2
+}
+
+fn current_output_line(out: &str) -> Option<&str> {
+    if out.is_empty() {
+        return None;
+    }
+    Some(out.rsplit('\n').next().unwrap_or(out))
 }
 
 fn is_word_like_text(text: &str) -> bool {
@@ -2038,6 +2178,53 @@ mod tests {
         let printed = print(&ir);
         assert!(printed.text.contains("var x =\n"));
         assert!(printed.text.contains("\n            .map("));
+    }
+
+    #[test]
+    fn keeps_builder_seed_on_first_chain_line() {
+        let source = "class A{void f(){var x=veryLongClient.fetch(someInput,SOME_REALLY_LONG_CONSTANT_NAME).toBuilder().setFoo(x).setBar(y).build();}}";
+        let lexed = lexer::lex(source);
+        let cst = parser::parse(&lexed);
+        let attachments = comments::attach(&cst, &lexed);
+        let ir = ir::build(&cst, attachments);
+        let printed = print(&ir);
+        assert!(printed.text.contains(
+            "veryLongClient.fetch(someInput, SOME_REALLY_LONG_CONSTANT_NAME).toBuilder()\n            .setFoo(x)"
+        ));
+    }
+
+    #[test]
+    fn breaks_long_return_chain() {
+        let source = "class A{Object f(){return writtenVariables.stream().filter(var->deletedVariableIds.contains(var.getId())).collect(toImmutableList());}}";
+        let lexed = lexer::lex(source);
+        let cst = parser::parse(&lexed);
+        let attachments = comments::attach(&cst, &lexed);
+        let ir = ir::build(&cst, attachments);
+        let printed = print(&ir);
+        assert!(printed.text.contains("return writtenVariables.stream()\n"));
+        assert!(printed.text.contains("        .filter("));
+        assert!(
+            printed
+                .text
+                .contains("        .collect(toImmutableList());")
+        );
+    }
+
+    #[test]
+    fn breaks_long_qualified_call_arguments() {
+        let source = "class A{void f(){logger.atDebug().log(\"Scratch Session Cleaner exiting. Number of deleted sessions: %d, names: %s\",deletedPersistentNames.size(),deletedPersistentNames);}}";
+        let lexed = lexer::lex(source);
+        let cst = parser::parse(&lexed);
+        let attachments = comments::attach(&cst, &lexed);
+        let ir = ir::build(&cst, attachments);
+        let printed = print(&ir);
+        assert!(printed.text.contains(".log(\n"));
+        assert!(printed.text.contains("%s\",\n"));
+        assert!(
+            printed
+                .text
+                .contains("deletedPersistentNames.size(), deletedPersistentNames);")
+        );
     }
 
     #[test]
