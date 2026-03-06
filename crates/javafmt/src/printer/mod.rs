@@ -111,6 +111,7 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                 i += 1;
             }
             TokenKind::BlockComment => {
+                let started_line_start = at_line_start;
                 let attach_after_statement = i > 0
                     && at_line_start
                     && out.ends_with('\n')
@@ -135,10 +136,7 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                 write_with_indent(&mut out, &mut at_line_start, comment_indent, text);
                 if text.ends_with('\n') {
                     at_line_start = true;
-                } else if attach_after_statement {
-                    out.push('\n');
-                    at_line_start = true;
-                } else if leading_block_comment {
+                } else if attach_after_statement || leading_block_comment || started_line_start {
                     out.push('\n');
                     at_line_start = true;
                 }
@@ -344,14 +342,16 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                 if annotation_active && annotation_paren_depth == 0 {
                     let next = next_symbol_text(tokens.as_slice(), i, ir.source);
                     if next.as_deref() != Some(".") && next.as_deref() != Some("(") {
-                        out.push('\n');
-                        at_line_start = true;
                         annotation_active = false;
                         annotation_brace_depth = 0;
                         if annotation_multiline_args_active {
                             indent = annotation_multiline_base_indent;
                             annotation_multiline_args_active = false;
                             annotation_multiline_args_paren_depth = 0;
+                        }
+                        if paren_depth == 0 && !at_line_start {
+                            out.push('\n');
+                            at_line_start = true;
                         }
                     }
                 }
@@ -372,15 +372,21 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
 
                 match symbol {
                     "@" => {
-                        if !at_line_start {
-                            out.push('\n');
-                            at_line_start = true;
-                        }
-                        let current_indent = active_indent(indent, &block_stack);
-                        write_with_indent(&mut out, &mut at_line_start, current_indent, "@");
                         let annotation_declaration =
                             next_symbol_text(tokens.as_slice(), i + consumed, ir.source).as_deref()
                                 == Some("interface");
+                        if !at_line_start {
+                            if paren_depth > 0 || annotation_declaration {
+                                if needs_space_before(&prev_text, "@", at_line_start) {
+                                    ensure_space(&mut out, at_line_start);
+                                }
+                            } else {
+                                out.push('\n');
+                                at_line_start = true;
+                            }
+                        }
+                        let current_indent = active_indent(indent, &block_stack);
+                        write_with_indent(&mut out, &mut at_line_start, current_indent, "@");
                         if annotation_declaration {
                             annotation_active = false;
                             annotation_paren_depth = 0;
@@ -604,12 +610,16 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                             if try_resource_paren_depth > 0
                                 && paren_depth == try_resource_paren_depth
                             {
-                                out.push('\n');
-                                at_line_start = true;
-                                if !try_resource_continuation_active {
-                                    try_resource_continuation_active = true;
-                                    try_resource_continuation_base_indent = indent;
-                                    indent += 2;
+                                if next_text.as_deref() == Some(")") {
+                                    out.push(' ');
+                                } else {
+                                    out.push('\n');
+                                    at_line_start = true;
+                                    if !try_resource_continuation_active {
+                                        try_resource_continuation_active = true;
+                                        try_resource_continuation_base_indent = indent;
+                                        indent += 2;
+                                    }
                                 }
                             } else {
                                 out.push(' ');
@@ -868,16 +878,15 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                         out.push(' ');
                     }
                     "<" => {
-                        let generic_like = paren_depth == 0
-                            && is_generic_open_angle(
-                                tokens.as_slice(),
-                                i,
-                                ir.source,
-                                &prev_kind,
-                                prev_text.as_deref(),
-                                next_text.as_deref(),
-                                at_line_start,
-                            );
+                        let generic_like = is_generic_open_angle(
+                            tokens.as_slice(),
+                            i,
+                            ir.source,
+                            &prev_kind,
+                            prev_text.as_deref(),
+                            next_text.as_deref(),
+                            at_line_start,
+                        );
                         if generic_like {
                             let current_indent = active_indent(indent, &block_stack);
                             write_with_indent(
@@ -910,6 +919,10 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                             write_with_indent(&mut out, &mut at_line_start, current_indent, ">");
                             out.push(' ');
                         }
+                    }
+                    "..." => {
+                        let current_indent = active_indent(indent, &block_stack);
+                        write_with_indent(&mut out, &mut at_line_start, current_indent, "...");
                     }
                     ">>" => {
                         if generic_depth >= 2 {
@@ -958,14 +971,16 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                     if symbol != "@" && symbol != "." {
                         let next = next_symbol_text(tokens.as_slice(), i, ir.source);
                         if next.as_deref() != Some(".") && next.as_deref() != Some("(") {
-                            out.push('\n');
-                            at_line_start = true;
                             annotation_active = false;
                             annotation_brace_depth = 0;
                             if annotation_multiline_args_active {
                                 indent = annotation_multiline_base_indent;
                                 annotation_multiline_args_active = false;
                                 annotation_multiline_args_paren_depth = 0;
+                            }
+                            if paren_depth == 0 && !at_line_start {
+                                out.push('\n');
+                                at_line_start = true;
                             }
                         }
                     }
@@ -1367,6 +1382,7 @@ fn read_symbol<'a>(tokens: &[&Token], index: usize, source: &'a str) -> (&'a str
         .is_some_and(|next| tokens[index + 1].end == next.start);
 
     let combined3 = match (first, second, third) {
+        (".", Some("."), Some(".")) if contiguous12 && contiguous23 => Some("..."),
         (">", Some(">"), Some(">")) if contiguous12 && contiguous23 => Some(">>>"),
         _ => None,
     };
@@ -2139,6 +2155,20 @@ mod tests {
     }
 
     #[test]
+    fn keeps_modifier_and_annotation_interface_on_same_line() {
+        let source =
+            "class A{public @interface B{} private @interface C{} protected @interface D{}}";
+        let lexed = lexer::lex(source);
+        let cst = parser::parse(&lexed);
+        let attachments = comments::attach(&cst, &lexed);
+        let ir = ir::build(&cst, attachments);
+        let printed = print(&ir);
+        assert!(printed.text.contains("public @interface B {"));
+        assert!(printed.text.contains("private @interface C {}"));
+        assert!(printed.text.contains("protected @interface D {}"));
+    }
+
+    #[test]
     fn keeps_block_comment_on_its_own_line_after_open_brace() {
         let source =
             "class A{void f(){do{/*x*/a();}while(cond());}void a(){}boolean cond(){return true;}}";
@@ -2148,6 +2178,17 @@ mod tests {
         let ir = ir::build(&cst, attachments);
         let printed = print(&ir);
         assert!(printed.text.contains("do {\n        /*x*/\n      a();"));
+    }
+
+    #[test]
+    fn keeps_standalone_block_comment_on_its_own_line_before_type() {
+        let source = "/** doc */class A{}";
+        let lexed = lexer::lex(source);
+        let cst = parser::parse(&lexed);
+        let attachments = comments::attach(&cst, &lexed);
+        let ir = ir::build(&cst, attachments);
+        let printed = print(&ir);
+        assert_eq!(printed.text, "/** doc */\nclass A {}\n");
     }
 
     #[test]
@@ -2164,6 +2205,37 @@ mod tests {
     }
 
     #[test]
+    fn keeps_annotations_inline_inside_parameter_lists() {
+        let source = "class A{record R<T>(@Deprecated int x,@Deprecated int... y){} void f(final @Deprecated String s){}}";
+        let lexed = lexer::lex(source);
+        let cst = parser::parse(&lexed);
+        let attachments = comments::attach(&cst, &lexed);
+        let ir = ir::build(&cst, attachments);
+        let printed = print(&ir);
+        assert!(
+            printed
+                .text
+                .contains("record R<T>(@Deprecated int x, @Deprecated int... y) {}")
+        );
+        assert!(
+            printed
+                .text
+                .contains("void f(final @Deprecated String s) {}")
+        );
+    }
+
+    #[test]
+    fn keeps_try_resource_annotations_inline() {
+        let source = "class A{{try(@A final @B C c=c();){}}}";
+        let lexed = lexer::lex(source);
+        let cst = parser::parse(&lexed);
+        let attachments = comments::attach(&cst, &lexed);
+        let ir = ir::build(&cst, attachments);
+        let printed = print(&ir);
+        assert!(printed.text.contains("try (@A final @B C c = c(); ) {}"));
+    }
+
+    #[test]
     fn breaks_long_generic_assignment_rhs() {
         let source = "class A{void f(){var m=java.util.Map.<String,java.util.List<java.util.Set<Integer>>>of(\"k\",java.util.List.of(java.util.Set.of(1,2)));}}";
         let lexed = lexer::lex(source);
@@ -2172,6 +2244,23 @@ mod tests {
         let ir = ir::build(&cst, attachments);
         let printed = print(&ir);
         assert!(printed.text.contains("var m =\n"));
+    }
+
+    #[test]
+    fn keeps_generic_types_tight_inside_parameter_lists() {
+        let source = "class A{record R<T>(){} int f(R<T> other,java.util.Map<String,java.util.List<T>> xs){return 0;}}";
+        let lexed = lexer::lex(source);
+        let cst = parser::parse(&lexed);
+        let attachments = comments::attach(&cst, &lexed);
+        let ir = ir::build(&cst, attachments);
+        let printed = print(&ir);
+        assert!(
+            printed
+                .text
+                .contains("int f(R<T> other, java.util.Map<String, java.util.List<T>> xs) {")
+        );
+        assert!(!printed.text.contains("R < T >"));
+        assert!(!printed.text.contains("List < T >"));
     }
 
     #[test]
