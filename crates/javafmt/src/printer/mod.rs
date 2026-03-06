@@ -81,6 +81,7 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
     let mut call_args_continuation_active = false;
     let mut call_args_continuation_paren_depth = 0usize;
     let mut call_args_continuation_base_indent = 0usize;
+    let mut call_args_comment_mode = false;
     let mut chain_continuation_active = false;
 
     while i < tokens.len() {
@@ -126,18 +127,23 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                     out.pop();
                     at_line_start = false;
                 }
-                ensure_space(&mut out, at_line_start);
-                let text = token_text(ir.source, token);
+                if prev_text.as_deref() != Some("(") {
+                    ensure_space(&mut out, at_line_start);
+                }
+                let text = normalize_block_comment_text(token_text(ir.source, token));
                 let current_indent = active_indent(indent, &block_stack);
                 let comment_indent = if leading_block_comment {
                     current_indent + 1
                 } else {
                     current_indent
                 };
-                write_with_indent(&mut out, &mut at_line_start, comment_indent, text);
+                write_with_indent(&mut out, &mut at_line_start, comment_indent, &text);
                 if text.ends_with('\n') {
                     at_line_start = true;
-                } else if attach_after_statement || leading_block_comment || started_line_start {
+                } else if attach_after_statement
+                    || leading_block_comment
+                    || (started_line_start && paren_depth == 0)
+                {
                     out.push('\n');
                     at_line_start = true;
                 }
@@ -524,6 +530,7 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                                 indent = call_args_continuation_base_indent;
                                 call_args_continuation_active = false;
                                 call_args_continuation_paren_depth = 0;
+                                call_args_comment_mode = false;
                             }
                         }
                         if paren_depth == 0 {
@@ -647,8 +654,9 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                             && annotation_brace_depth == 0;
                         let call_args_comma = call_args_continuation_active
                             && paren_depth == call_args_continuation_paren_depth
-                            && current_output_line(out.as_str())
-                                .is_some_and(|line| line.chars().count() >= 60);
+                            && (call_args_comment_mode
+                                || current_output_line(out.as_str())
+                                    .is_some_and(|line| line.chars().count() >= 60));
                         if enum_constants_comma
                             || (module_continuation_active && paren_depth == 0)
                             || annotation_args_comma
@@ -713,6 +721,11 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                                 call_args_continuation_active = true;
                                 call_args_continuation_paren_depth = paren_depth;
                                 call_args_continuation_base_indent = indent;
+                                call_args_comment_mode = has_block_comment_argument_list(
+                                    tokens.as_slice(),
+                                    i + consumed,
+                                    ir.source,
+                                );
                                 indent += 2;
                             }
                         }
@@ -750,6 +763,7 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                         if closes_call_args_continuation {
                             call_args_continuation_active = false;
                             call_args_continuation_paren_depth = 0;
+                            call_args_comment_mode = false;
                         }
                     }
                     "." | "[" | "]" | "::" => {
@@ -1216,6 +1230,34 @@ fn has_chained_call_continuation(tokens: &[&Token], mut index: usize, source: &s
     dot_after_call_count >= 1
 }
 
+fn has_block_comment_argument_list(tokens: &[&Token], mut index: usize, source: &str) -> bool {
+    let mut local_paren_depth = 0usize;
+
+    while index < tokens.len() {
+        let token = tokens[index];
+        match token.kind {
+            TokenKind::BlockComment => return true,
+            TokenKind::Symbol => {
+                let (symbol, consumed) = read_symbol(tokens, index, source);
+                match symbol {
+                    "(" => local_paren_depth += 1,
+                    ")" => {
+                        if local_paren_depth == 0 {
+                            break;
+                        }
+                        local_paren_depth -= 1;
+                    }
+                    _ => {}
+                }
+                index += consumed;
+            }
+            _ => index += 1,
+        }
+    }
+
+    false
+}
+
 fn should_break_annotation_arguments(tokens: &[&Token], mut index: usize, source: &str) -> bool {
     let mut local_paren_depth = 0usize;
     let mut local_brace_depth = 0usize;
@@ -1335,21 +1377,61 @@ fn is_wrappable_invocation_open_paren(
         return false;
     }
 
-    let mut cursor = index - 1;
-    while cursor > 0 {
-        cursor -= 1;
-        let token = tokens[cursor];
-        match token.kind {
-            TokenKind::Whitespace | TokenKind::Newline => continue,
-            TokenKind::Symbol => {
-                let (symbol, _) = read_symbol(tokens, cursor, source);
-                return matches!(symbol, "." | "::");
-            }
-            _ => return false,
+    match tokens[index - 2].kind {
+        TokenKind::Symbol => {
+            let (symbol, _) = read_symbol(tokens, index - 2, source);
+            matches!(
+                symbol,
+                "." | "::"
+                    | "{"
+                    | ";"
+                    | "("
+                    | "["
+                    | ","
+                    | "="
+                    | "+="
+                    | "-="
+                    | "*="
+                    | "/="
+                    | "%="
+                    | "&="
+                    | "|="
+                    | "^="
+                    | "=="
+                    | "!="
+                    | "<="
+                    | ">="
+                    | "&&"
+                    | "||"
+                    | "+"
+                    | "-"
+                    | "*"
+                    | "/"
+                    | "%"
+                    | "&"
+                    | "|"
+                    | "^"
+                    | "<"
+                    | ">"
+                    | "<<"
+                    | ">>"
+                    | ">>>"
+                    | "<<="
+                    | ">>="
+                    | ">>>="
+                    | "!"
+                    | "~"
+                    | "?"
+                    | ":"
+                    | "->"
+            )
         }
+        TokenKind::Word => matches!(
+            token_text(source, tokens[index - 2]),
+            "return" | "throw" | "yield" | "case" | "new" | "assert"
+        ),
+        _ => false,
     }
-
-    false
 }
 
 fn is_explicit_type_argument_call(tokens: &[&Token], index: usize, source: &str) -> bool {
@@ -1832,6 +1914,28 @@ fn normalize_line_comment_text(text: &str) -> String {
     text.to_owned()
 }
 
+fn normalize_block_comment_text(text: &str) -> String {
+    if text.contains('\n')
+        || !text.starts_with("/*")
+        || !text.ends_with("*/")
+        || text.starts_with("/**")
+    {
+        return text.to_owned();
+    }
+
+    let inner = &text[2..text.len() - 2];
+    let trimmed = inner.trim();
+    if trimmed.is_empty() {
+        return text.to_owned();
+    }
+
+    if trimmed.contains('=') {
+        return format!("/* {trimmed} */");
+    }
+
+    text.to_owned()
+}
+
 fn write_with_indent(out: &mut String, at_line_start: &mut bool, indent: usize, text: &str) {
     if *at_line_start {
         for _ in 0..indent {
@@ -2225,6 +2329,32 @@ mod tests {
                 .text
                 .contains("deletedPersistentNames.size(), deletedPersistentNames);")
         );
+    }
+
+    #[test]
+    fn breaks_long_unqualified_call_arguments() {
+        let source = "class A{void f(){g(xxxxxxxxxxxxxxxxxxxxxxxxx,xxxxxxxxxxxxxxxxxxxxxxxxx,xxxxxxxxxxxxxxxxxxxxxxxxx,xxxxxxxxxxxxxxxxxxxxxxxxx,xxxxxxxxxxxxxxxxxxxxxxxxx,xxxxxxxxxxxxxxxxxxxxxxxxx,xxxxxxxxxxxxxxxxxxxxxxxxx,xxxxxxxxxxxxxxxxxxxxxxxxx);}}";
+        let lexed = lexer::lex(source);
+        let cst = parser::parse(&lexed);
+        let attachments = comments::attach(&cst, &lexed);
+        let ir = ir::build(&cst, attachments);
+        let printed = print(&ir);
+        assert!(printed.text.contains("g(\n"));
+        assert!(printed.text.contains(",\n"));
+    }
+
+    #[test]
+    fn normalizes_parameter_comments_and_breaks_long_comment_calls() {
+        let source = "class A{void f(){f(/*a=*/ 1);g(/*a=*/ 1,/*b=*/ 1,/*c=*/ 1,/*d=*/ 1,/*e=*/ 1,/*f=*/ 1,/*g=*/ 1,/*h=*/ 1,/*i=*/ 1);h(/*xs...=*/ null);}}";
+        let lexed = lexer::lex(source);
+        let cst = parser::parse(&lexed);
+        let attachments = comments::attach(&cst, &lexed);
+        let ir = ir::build(&cst, attachments);
+        let printed = print(&ir);
+        assert!(printed.text.contains("f(/* a= */ 1);"));
+        assert!(printed.text.contains("g(\n"));
+        assert!(printed.text.contains("/* a= */ 1,\n"));
+        assert!(printed.text.contains("h(/* xs...= */ null);"));
     }
 
     #[test]
