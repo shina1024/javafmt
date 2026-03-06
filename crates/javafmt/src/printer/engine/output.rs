@@ -49,10 +49,11 @@ pub(super) fn ensure_space(out: &mut String, at_line_start: bool) {
     if at_line_start {
         return;
     }
-    if let Some(ch) = out.chars().last() {
-        if ch != ' ' && ch != '\n' {
-            out.push(' ');
-        }
+    if let Some(ch) = out.chars().last()
+        && ch != ' '
+        && ch != '\n'
+    {
+        out.push(' ');
     }
 }
 

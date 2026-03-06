@@ -125,8 +125,7 @@ pub(super) fn starts_block_lambda_rhs(tokens: &[&Token], mut index: usize, sourc
                     local_paren_depth = local_paren_depth.saturating_sub(1);
                 }
                 "->" if local_paren_depth == 0 => {
-                    return next_symbol_text(tokens, index + consumed, source).as_deref()
-                        == Some("{");
+                    return next_symbol_text(tokens, index + consumed, source) == Some("{");
                 }
                 _ => {}
             }
@@ -462,36 +461,40 @@ impl CallArgumentMetrics {
     }
 }
 
+pub(super) struct InlineAnnotationContext<'a> {
+    pub in_type_body: bool,
+    pub top_level_declaration: bool,
+    pub annotation_name: Option<&'a str>,
+    pub annotation_started_line_start: bool,
+    pub annotation_has_args: bool,
+    pub paren_depth: usize,
+}
+
 pub(super) fn should_keep_inline_annotation(
     tokens: &[&Token],
     index: usize,
     source: &str,
-    in_type_body: bool,
-    top_level_declaration: bool,
-    annotation_name: Option<&str>,
-    annotation_started_line_start: bool,
-    annotation_has_args: bool,
-    paren_depth: usize,
+    context: InlineAnnotationContext<'_>,
 ) -> bool {
-    if paren_depth > 0 || !annotation_started_line_start {
+    if context.paren_depth > 0 || !context.annotation_started_line_start {
         return true;
     }
 
-    if top_level_declaration {
+    if context.top_level_declaration {
         return false;
     }
 
-    if !in_type_body {
-        return !annotation_has_args;
+    if !context.in_type_body {
+        return !context.annotation_has_args;
     }
 
-    if annotation_has_args || is_declaration_like_annotation(annotation_name) {
+    if context.annotation_has_args || is_declaration_like_annotation(context.annotation_name) {
         return false;
     }
 
     let next_text = next_symbol_text(tokens, index, source);
     match next_text {
-        Some("@") => is_type_use_friendly_annotation(annotation_name),
+        Some("@") => is_type_use_friendly_annotation(context.annotation_name),
         Some(word)
             if is_declaration_modifier(word)
                 || is_type_declaration_keyword(word)
@@ -559,7 +562,7 @@ pub(super) fn consume_type_like(
                 index = skip_type_arguments(tokens, index, source);
             }
             "[" => {
-                if next_symbol_text(tokens, index + consumed, source).as_deref() != Some("]") {
+                if next_symbol_text(tokens, index + consumed, source) != Some("]") {
                     return Some(index);
                 }
                 index += consumed;
@@ -973,7 +976,7 @@ pub(super) fn is_generic_open_angle(
     at_line_start: bool,
 ) -> bool {
     if next_text == Some(">")
-        && next_symbol_text(tokens, index + 2, source).as_deref() == Some("(")
+        && next_symbol_text(tokens, index + 2, source) == Some("(")
         && (matches!(
             prev_kind,
             Some(TokenKind::Word | TokenKind::StringLiteral | TokenKind::CharLiteral)
@@ -1078,7 +1081,7 @@ pub(super) fn is_tight_after_generic_close(
     if !matches!(prev_text, Some(">" | ">>" | ">>>")) {
         return false;
     }
-    next_symbol_text(tokens, word_index + 1, source).as_deref() == Some("(")
+    next_symbol_text(tokens, word_index + 1, source) == Some("(")
 }
 
 pub(super) fn is_inline_initializer_brace(

@@ -61,12 +61,12 @@ pub fn lex(source: &str) -> LexedSource<'_> {
                 let mut end = next_index + '*'.len_utf8();
                 while let Some((idx, next_ch)) = chars.next() {
                     end = idx + next_ch.len_utf8();
-                    if next_ch == '*' {
-                        if let Some((slash_index, '/')) = chars.peek().copied() {
-                            chars.next();
-                            end = slash_index + '/'.len_utf8();
-                            break;
-                        }
+                    if next_ch == '*'
+                        && let Some((slash_index, '/')) = chars.peek().copied()
+                    {
+                        chars.next();
+                        end = slash_index + '/'.len_utf8();
+                        break;
                     }
                 }
                 tokens.push(Token {
@@ -167,7 +167,7 @@ fn read_quoted_literal(
     mut end: usize,
 ) -> usize {
     let mut escaped = false;
-    while let Some((idx, ch)) = chars.next() {
+    for (idx, ch) in chars.by_ref() {
         end = idx + ch.len_utf8();
         if escaped {
             escaped = false;

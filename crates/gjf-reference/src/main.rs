@@ -167,14 +167,14 @@ fn run() -> Result<ExitCode, String> {
         return Ok(ExitCode::from(1));
     }
 
-    if let Some(min_ratio) = cli.min_gjf_over_javafmt {
-        if report.gjf_over_javafmt_ratio < min_ratio {
-            eprintln!(
-                "gate failed: gjf_over_javafmt_ratio={:.3} < min_gjf_over_javafmt={:.3}",
-                report.gjf_over_javafmt_ratio, min_ratio
-            );
-            return Ok(ExitCode::from(1));
-        }
+    if let Some(min_ratio) = cli.min_gjf_over_javafmt
+        && report.gjf_over_javafmt_ratio < min_ratio
+    {
+        eprintln!(
+            "gate failed: gjf_over_javafmt_ratio={:.3} < min_gjf_over_javafmt={:.3}",
+            report.gjf_over_javafmt_ratio, min_ratio
+        );
+        return Ok(ExitCode::from(1));
     }
 
     Ok(ExitCode::SUCCESS)
@@ -250,10 +250,10 @@ fn load_sources(files: &[PathBuf]) -> Result<Vec<SourceFile>, String> {
 }
 
 fn write_json_report<T: Serialize>(path: &Path, report: &T) -> Result<(), String> {
-    if let Some(parent) = path.parent() {
-        if !parent.as_os_str().is_empty() {
-            fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
-        }
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
     }
     let json = serde_json::to_string_pretty(report).map_err(|e| format!("json: {e}"))?;
     fs::write(path, json).map_err(|e| format!("{}: {e}", path.display()))

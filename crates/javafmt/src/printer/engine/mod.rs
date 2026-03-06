@@ -141,7 +141,7 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                     && block_stack.last().is_some_and(|frame| {
                         frame.kind == BlockKind::Switch && frame.in_switch_case
                     })
-                    && matches!(next.as_deref(), Some("case" | "default"))
+                    && matches!(next, Some("case" | "default"))
                 {
                     current_indent = current_indent.saturating_sub(1);
                 }
@@ -300,7 +300,7 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                                         &mut out,
                                         &mut at_line_start,
                                         current_indent,
-                                        &symbol,
+                                        symbol,
                                     );
                                 }
                                 "(" => {
@@ -329,7 +329,7 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                                         &mut out,
                                         &mut at_line_start,
                                         current_indent,
-                                        &symbol,
+                                        symbol,
                                     );
                                     out.push(' ');
                                 }
@@ -339,7 +339,7 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                                         &mut out,
                                         &mut at_line_start,
                                         current_indent,
-                                        &symbol,
+                                        symbol,
                                     );
                                 }
                             }
@@ -437,7 +437,7 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
 
                 if annotation_active && annotation_paren_depth == 0 {
                     let next = next_symbol_text(tokens.as_slice(), i, ir.source);
-                    if next.as_deref() != Some(".") && next.as_deref() != Some("(") {
+                    if next != Some(".") && next != Some("(") {
                         let in_type_body = block_stack.last().is_some_and(|frame| {
                             matches!(frame.kind, BlockKind::TypeBody | BlockKind::EnumBody)
                         });
@@ -445,12 +445,14 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                             tokens.as_slice(),
                             i,
                             ir.source,
-                            in_type_body,
-                            block_stack.is_empty() && paren_depth == 0,
-                            annotation_name.as_deref(),
-                            annotation_started_line_start,
-                            annotation_has_args,
-                            paren_depth,
+                            InlineAnnotationContext {
+                                in_type_body,
+                                top_level_declaration: block_stack.is_empty() && paren_depth == 0,
+                                annotation_name: annotation_name.as_deref(),
+                                annotation_started_line_start,
+                                annotation_has_args,
+                                paren_depth,
+                            },
                         );
                         annotation_active = false;
                         annotation_brace_depth = 0;
@@ -489,7 +491,7 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                 match symbol {
                     "@" => {
                         let annotation_declaration =
-                            next_symbol_text(tokens.as_slice(), i + consumed, ir.source).as_deref()
+                            next_symbol_text(tokens.as_slice(), i + consumed, ir.source)
                                 == Some("interface");
                         let in_type_body = block_stack.last().is_some_and(|frame| {
                             matches!(frame.kind, BlockKind::TypeBody | BlockKind::EnumBody)
@@ -545,7 +547,7 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                             annotation_brace_depth += 1;
                         }
 
-                        let is_empty = next_text.as_deref() == Some("}");
+                        let is_empty = next_text == Some("}");
                         let initializer_brace = matches!(prev_text.as_deref(), Some("]" | "="));
                         let inline_brace = (is_inline_initializer_brace(
                             tokens.as_slice(),
@@ -617,23 +619,21 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                         let parent_is_type_body = block_stack.last().is_some_and(|parent| {
                             matches!(parent.kind, BlockKind::TypeBody | BlockKind::EnumBody)
                         });
-                        if next_text.as_deref() == Some(";") {
+                        if next_text == Some(";") {
                             // keep same line for "};"
-                        } else if next_text.as_deref() == Some(")") {
+                        } else if next_text == Some(")") {
                             // keep same line for "})"
-                        } else if next_text.as_deref() == Some(",") {
+                        } else if next_text == Some(",") {
                             // keep same line for "},"
                         } else if frame.kind == BlockKind::Inline {
                             // keep inline initializers on one line
-                        } else if matches!(next_text.as_deref(), Some("else" | "catch" | "finally"))
+                        } else if matches!(next_text, Some("else" | "catch" | "finally" | "while"))
                         {
-                            out.push(' ');
-                        } else if next_text.as_deref() == Some("while") {
                             out.push(' ');
                         } else if next_text.is_some() {
                             out.push('\n');
                             at_line_start = true;
-                            if parent_is_type_body && next_text.as_deref() != Some("}") {
+                            if parent_is_type_body && next_text != Some("}") {
                                 out.push('\n');
                             }
                         }
@@ -680,12 +680,12 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                                 array_index_continuation_depth = 0;
                             }
                         }
-                        if paren_depth == 0 {
-                            if let Some(frame) = block_stack.last_mut() {
-                                if frame.kind == BlockKind::EnumBody && frame.in_enum_constants {
-                                    frame.in_enum_constants = false;
-                                }
-                            }
+                        if paren_depth == 0
+                            && let Some(frame) = block_stack.last_mut()
+                            && frame.kind == BlockKind::EnumBody
+                            && frame.in_enum_constants
+                        {
+                            frame.in_enum_constants = false;
                         }
                         if lambda_continuation_active
                             && block_stack.len() == lambda_continuation_base_block_depth
@@ -717,7 +717,7 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                                 });
                             if in_type_body
                                 && (has_blank_line_before_next
-                                    || (next_text.as_deref() != Some("}")
+                                    || (next_text != Some("}")
                                         && next_member_looks_like_method(
                                             tokens.as_slice(),
                                             i + consumed,
@@ -727,7 +727,7 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                                 out.push('\n');
                             }
                             if in_module_body {
-                                if next_text.as_deref() == Some("}") {
+                                if next_text == Some("}") {
                                     pending_module_directive = None;
                                 } else {
                                     let next_directive = next_module_directive(
@@ -736,12 +736,10 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                                         ir.source,
                                     );
                                     if let Some(current_directive) = pending_module_directive.take()
-                                    {
-                                        if next_directive
+                                        && next_directive
                                             .is_some_and(|next| next != current_directive)
-                                        {
-                                            out.push('\n');
-                                        }
+                                    {
+                                        out.push('\n');
                                     }
                                 }
                             } else {
@@ -758,16 +756,13 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                                     );
                                     match current_directive {
                                         TopLevelDirective::Package => {
-                                            if next_text.as_deref().is_some_and(|next| next != "}")
-                                            {
+                                            if next_text.is_some_and(|next| next != "}") {
                                                 out.push('\n');
                                             }
                                         }
                                         TopLevelDirective::Import => {
                                             if next_directive != Some(TopLevelDirective::Import)
-                                                && next_text
-                                                    .as_deref()
-                                                    .is_some_and(|next| next != "}")
+                                                && next_text.is_some_and(|next| next != "}")
                                             {
                                                 out.push('\n');
                                             }
@@ -777,24 +772,22 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                             } else {
                                 pending_top_level_directive = None;
                             }
-                        } else {
-                            if try_resource_paren_depth > 0
-                                && paren_depth == try_resource_paren_depth
-                            {
-                                if next_text.as_deref() == Some(")") {
-                                    out.push(' ');
-                                } else {
-                                    out.push('\n');
-                                    at_line_start = true;
-                                    if !try_resource_continuation_active {
-                                        try_resource_continuation_active = true;
-                                        try_resource_continuation_base_indent = indent;
-                                        indent += 2;
-                                    }
-                                }
-                            } else {
+                        } else if try_resource_paren_depth > 0
+                            && paren_depth == try_resource_paren_depth
+                        {
+                            if next_text == Some(")") {
                                 out.push(' ');
+                            } else {
+                                out.push('\n');
+                                at_line_start = true;
+                                if !try_resource_continuation_active {
+                                    try_resource_continuation_active = true;
+                                    try_resource_continuation_base_indent = indent;
+                                    indent += 2;
+                                }
                             }
+                        } else {
+                            out.push(' ');
                         }
                     }
                     "," => {
@@ -856,7 +849,7 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                             && current_output_line(out.as_str()).is_some_and(|line| {
                                 line.trim_start().starts_with('.')
                                     && line.chars().count() >= 40
-                                    && next_text.as_deref() != Some(")")
+                                    && next_text != Some(")")
                             });
                         let should_break_after_open_paren = if explicit_type_argument_call {
                             call_argument_metrics
@@ -1000,7 +993,7 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                             &mut out,
                             &mut at_line_start,
                             current_indent + extra_indent,
-                            &symbol,
+                            symbol,
                         );
                         if symbol == "[" {
                             bracket_depth += 1;
@@ -1033,10 +1026,10 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                     }
                     "++" | "--" => {
                         let current_indent = active_indent(indent, &block_stack);
-                        write_with_indent(&mut out, &mut at_line_start, current_indent, &symbol);
+                        write_with_indent(&mut out, &mut at_line_start, current_indent, symbol);
                     }
                     "+" => {
-                        if is_exponent_sign_context(prev_text.as_deref(), next_text.as_deref()) {
+                        if is_exponent_sign_context(prev_text.as_deref(), next_text) {
                             let current_indent = active_indent(indent, &block_stack);
                             write_with_indent(&mut out, &mut at_line_start, current_indent, "+");
                         } else if is_unary_prefix_context(prev_text.as_deref()) {
@@ -1048,12 +1041,7 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                         } else {
                             ensure_space(&mut out, at_line_start);
                             let current_indent = active_indent(indent, &block_stack);
-                            write_with_indent(
-                                &mut out,
-                                &mut at_line_start,
-                                current_indent,
-                                &symbol,
-                            );
+                            write_with_indent(&mut out, &mut at_line_start, current_indent, symbol);
                             out.push(' ');
                         }
                     }
@@ -1092,16 +1080,11 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                         }
                     }
                     "-" => {
-                        if prev_text.as_deref() == Some("non")
-                            && next_text.as_deref() == Some("sealed")
-                        {
+                        if prev_text.as_deref() == Some("non") && next_text == Some("sealed") {
                             let current_indent = active_indent(indent, &block_stack);
                             write_with_indent(&mut out, &mut at_line_start, current_indent, "-");
                             pending_non_sealed = true;
-                        } else if is_exponent_sign_context(
-                            prev_text.as_deref(),
-                            next_text.as_deref(),
-                        ) {
+                        } else if is_exponent_sign_context(prev_text.as_deref(), next_text) {
                             let current_indent = active_indent(indent, &block_stack);
                             write_with_indent(&mut out, &mut at_line_start, current_indent, "-");
                         } else if is_unary_prefix_context(prev_text.as_deref()) {
@@ -1113,21 +1096,16 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                         } else {
                             ensure_space(&mut out, at_line_start);
                             let current_indent = active_indent(indent, &block_stack);
-                            write_with_indent(
-                                &mut out,
-                                &mut at_line_start,
-                                current_indent,
-                                &symbol,
-                            );
+                            write_with_indent(&mut out, &mut at_line_start, current_indent, symbol);
                             out.push(' ');
                         }
                     }
                     "!" | "~" => {
-                        if needs_space_before(&prev_text, &symbol, at_line_start) {
+                        if needs_space_before(&prev_text, symbol, at_line_start) {
                             ensure_space(&mut out, at_line_start);
                         }
                         let current_indent = active_indent(indent, &block_stack);
-                        write_with_indent(&mut out, &mut at_line_start, current_indent, &symbol);
+                        write_with_indent(&mut out, &mut at_line_start, current_indent, symbol);
                     }
                     "?" => {
                         let multiline = should_break_ternary(out.as_str());
@@ -1169,7 +1147,7 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                         } else if is_label_colon_context(
                             &prev_kind,
                             prev_text.as_deref(),
-                            next_text.as_deref(),
+                            next_text,
                             paren_depth,
                         ) {
                             let current_indent = active_indent(indent, &block_stack);
@@ -1187,7 +1165,7 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                     | ">=" | "&&" | "||" | "*" | "/" | "%" | "&" | "|" | "^" | "->" => {
                         ensure_space(&mut out, at_line_start);
                         let current_indent = active_indent(indent, &block_stack);
-                        write_with_indent(&mut out, &mut at_line_start, current_indent, &symbol);
+                        write_with_indent(&mut out, &mut at_line_start, current_indent, symbol);
                         out.push(' ');
                     }
                     "<" => {
@@ -1197,27 +1175,17 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                             ir.source,
                             &prev_kind,
                             prev_text.as_deref(),
-                            next_text.as_deref(),
+                            next_text,
                             at_line_start,
                         );
                         if generic_like {
                             let current_indent = active_indent(indent, &block_stack);
-                            write_with_indent(
-                                &mut out,
-                                &mut at_line_start,
-                                current_indent,
-                                &symbol,
-                            );
+                            write_with_indent(&mut out, &mut at_line_start, current_indent, symbol);
                             generic_depth += 1;
                         } else {
                             ensure_space(&mut out, at_line_start);
                             let current_indent = active_indent(indent, &block_stack);
-                            write_with_indent(
-                                &mut out,
-                                &mut at_line_start,
-                                current_indent,
-                                &symbol,
-                            );
+                            write_with_indent(&mut out, &mut at_line_start, current_indent, symbol);
                             out.push(' ');
                         }
                     }
@@ -1264,15 +1232,15 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                     "<<" | "<<=" | ">>=" | ">>>=" => {
                         ensure_space(&mut out, at_line_start);
                         let current_indent = active_indent(indent, &block_stack);
-                        write_with_indent(&mut out, &mut at_line_start, current_indent, &symbol);
+                        write_with_indent(&mut out, &mut at_line_start, current_indent, symbol);
                         out.push(' ');
                     }
                     _ => {
-                        if needs_space_before(&prev_text, &symbol, at_line_start) {
+                        if needs_space_before(&prev_text, symbol, at_line_start) {
                             ensure_space(&mut out, at_line_start);
                         }
                         let current_indent = active_indent(indent, &block_stack);
-                        write_with_indent(&mut out, &mut at_line_start, current_indent, &symbol);
+                        write_with_indent(&mut out, &mut at_line_start, current_indent, symbol);
                     }
                 }
 
@@ -1280,38 +1248,42 @@ fn format_tokens(ir: &FormatIr<'_>) -> String {
                 prev_kind = Some(TokenKind::Symbol);
                 i += consumed;
 
-                if annotation_active && annotation_paren_depth == 0 {
-                    if symbol != "@" && symbol != "." {
-                        let next = next_symbol_text(tokens.as_slice(), i, ir.source);
-                        if next.as_deref() != Some(".") && next.as_deref() != Some("(") {
-                            let in_type_body = block_stack.last().is_some_and(|frame| {
-                                matches!(frame.kind, BlockKind::TypeBody | BlockKind::EnumBody)
-                            });
-                            let keep_inline = should_keep_inline_annotation(
-                                tokens.as_slice(),
-                                i,
-                                ir.source,
+                if annotation_active
+                    && annotation_paren_depth == 0
+                    && symbol != "@"
+                    && symbol != "."
+                {
+                    let next = next_symbol_text(tokens.as_slice(), i, ir.source);
+                    if next != Some(".") && next != Some("(") {
+                        let in_type_body = block_stack.last().is_some_and(|frame| {
+                            matches!(frame.kind, BlockKind::TypeBody | BlockKind::EnumBody)
+                        });
+                        let keep_inline = should_keep_inline_annotation(
+                            tokens.as_slice(),
+                            i,
+                            ir.source,
+                            InlineAnnotationContext {
                                 in_type_body,
-                                block_stack.is_empty() && paren_depth == 0,
-                                annotation_name.as_deref(),
+                                top_level_declaration: block_stack.is_empty() && paren_depth == 0,
+                                annotation_name: annotation_name.as_deref(),
                                 annotation_started_line_start,
                                 annotation_has_args,
                                 paren_depth,
-                            );
-                            annotation_active = false;
-                            annotation_brace_depth = 0;
-                            annotation_has_args = false;
-                            annotation_name = None;
-                            annotation_inline_run_active = keep_inline;
-                            if annotation_multiline_args_active {
-                                indent = annotation_multiline_base_indent;
-                                annotation_multiline_args_active = false;
-                                annotation_multiline_args_paren_depth = 0;
-                            }
-                            if !keep_inline && paren_depth == 0 && !at_line_start {
-                                out.push('\n');
-                                at_line_start = true;
-                            }
+                            },
+                        );
+                        annotation_active = false;
+                        annotation_brace_depth = 0;
+                        annotation_has_args = false;
+                        annotation_name = None;
+                        annotation_inline_run_active = keep_inline;
+                        if annotation_multiline_args_active {
+                            indent = annotation_multiline_base_indent;
+                            annotation_multiline_args_active = false;
+                            annotation_multiline_args_paren_depth = 0;
+                        }
+                        if !keep_inline && paren_depth == 0 && !at_line_start {
+                            out.push('\n');
+                            at_line_start = true;
                         }
                     }
                 }

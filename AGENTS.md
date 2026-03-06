@@ -20,6 +20,7 @@ Build a fast Java formatter (`javafmt`) that is byte-compatible with `google-jav
 1. Implement smallest coherent change set with regression tests.
 2. Run:
    - `cargo fmt --all`
+   - `cargo clippy --all-targets`
    - `cargo test --workspace --locked`
    - `cargo run -p gjf-reference -- --runs 3 --max-mismatches 0 --min-gjf-over-javafmt 1.10 --report target/gjf-report-local.json fixtures/java`
 3. If any mismatch appears, inspect and either:
@@ -39,6 +40,12 @@ Build a fast Java formatter (`javafmt`) that is byte-compatible with `google-jav
 - Preserve fast-path behavior (single-pass, low-allocation heuristics).
 - Avoid compatibility patches that add repeated full rescans in hot path.
 - Do not accept changes that break the CI speed gate (`--min-gjf-over-javafmt 1.10`).
+- Prefer idiomatic Rust, but keep explicit hot-path code when iterator-heavy rewrites would add allocations or regress throughput.
+
+## Rust Module Policy
+
+- For new module splits, prefer `module.rs` plus `module/` children over introducing fresh `mod.rs` files.
+- Do not introduce `unsafe`, `Box::leak`, `mem::forget`, or unstable `#![feature(...)]` usage without explicit confirmation.
 
 ## Fixture Policy
 
