@@ -4,11 +4,9 @@ mod syntax;
 
 pub mod bench_support;
 pub mod comments;
-pub mod cst;
 pub mod emit;
 pub mod ir;
 pub mod lexer;
-pub mod parser;
 pub mod printer;
 
 #[derive(Debug, Clone, PartialEq, Eq)]

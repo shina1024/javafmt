@@ -1,31 +1,30 @@
 use super::tree::{FileOutline, ParsedFile, TopLevelItem, TopLevelItemKind};
 use crate::lexer::TokenKind;
-use crate::{comments, lexer, parser};
+use crate::{comments, lexer};
 
 pub(crate) fn parse_file(source: &str) -> ParsedFile<'_> {
     let lexed = lexer::lex(source);
-    let cst = parser::parse(&lexed);
-    let comments = comments::attach(&cst, &lexed);
-    let outline = build_outline(&cst);
-
-    let _ = lexed;
+    let comments = comments::attach(&lexed);
+    let outline = build_outline(&lexed);
 
     ParsedFile {
-        cst,
+        lexed,
         comments,
         outline,
     }
 }
 
-fn build_outline(cst: &crate::cst::Cst<'_>) -> FileOutline {
+fn build_outline(lexed: &crate::lexer::LexedSource<'_>) -> FileOutline {
     let mut items = Vec::new();
     let mut index = 0usize;
 
-    while let Some(start) = next_top_level_start(cst, index) {
-        let kind = classify_top_level_item(cst, start);
+    while let Some(start) = next_top_level_start(lexed, index) {
+        let kind = classify_top_level_item(lexed, start);
         let end_token = match kind {
-            TopLevelItemKind::Package | TopLevelItemKind::Import => scan_statement_end(cst, start),
-            _ => scan_top_level_item_end(cst, start),
+            TopLevelItemKind::Package | TopLevelItemKind::Import => {
+                scan_statement_end(lexed, start)
+            }
+            _ => scan_top_level_item_end(lexed, start),
         };
         items.push(TopLevelItem {
             kind,
@@ -38,9 +37,9 @@ fn build_outline(cst: &crate::cst::Cst<'_>) -> FileOutline {
     FileOutline { items }
 }
 
-fn next_top_level_start(cst: &crate::cst::Cst<'_>, mut index: usize) -> Option<usize> {
-    while index < cst.tokens.len() {
-        let token = &cst.tokens[index];
+fn next_top_level_start(lexed: &crate::lexer::LexedSource<'_>, mut index: usize) -> Option<usize> {
+    while index < lexed.tokens.len() {
+        let token = &lexed.tokens[index];
         match token.kind {
             TokenKind::Whitespace
             | TokenKind::Newline
@@ -54,10 +53,13 @@ fn next_top_level_start(cst: &crate::cst::Cst<'_>, mut index: usize) -> Option<u
     None
 }
 
-fn classify_top_level_item(cst: &crate::cst::Cst<'_>, start: usize) -> TopLevelItemKind {
+fn classify_top_level_item(
+    lexed: &crate::lexer::LexedSource<'_>,
+    start: usize,
+) -> TopLevelItemKind {
     let mut index = start;
-    while index < cst.tokens.len() {
-        let token = &cst.tokens[index];
+    while index < lexed.tokens.len() {
+        let token = &lexed.tokens[index];
         match token.kind {
             TokenKind::Whitespace
             | TokenKind::Newline
@@ -65,7 +67,7 @@ fn classify_top_level_item(cst: &crate::cst::Cst<'_>, start: usize) -> TopLevelI
             | TokenKind::BlockComment => {
                 index += 1;
             }
-            TokenKind::Word => match token_text(cst, index) {
+            TokenKind::Word => match token_text(lexed, index) {
                 "package" => return TopLevelItemKind::Package,
                 "import" => return TopLevelItemKind::Import,
                 "class" | "interface" | "record" | "enum" => {
@@ -75,7 +77,7 @@ fn classify_top_level_item(cst: &crate::cst::Cst<'_>, start: usize) -> TopLevelI
                 _ => index += 1,
             },
             TokenKind::Symbol => {
-                if token_text(cst, index) == ";" {
+                if token_text(lexed, index) == ";" {
                     return TopLevelItemKind::Other;
                 }
                 index += 1;
@@ -87,21 +89,21 @@ fn classify_top_level_item(cst: &crate::cst::Cst<'_>, start: usize) -> TopLevelI
     TopLevelItemKind::Other
 }
 
-fn scan_statement_end(cst: &crate::cst::Cst<'_>, mut index: usize) -> usize {
-    while index < cst.tokens.len() {
-        if cst.tokens[index].kind == TokenKind::Symbol && token_text(cst, index) == ";" {
+fn scan_statement_end(lexed: &crate::lexer::LexedSource<'_>, mut index: usize) -> usize {
+    while index < lexed.tokens.len() {
+        if lexed.tokens[index].kind == TokenKind::Symbol && token_text(lexed, index) == ";" {
             return index + 1;
         }
         index += 1;
     }
-    cst.tokens.len()
+    lexed.tokens.len()
 }
 
-fn scan_top_level_item_end(cst: &crate::cst::Cst<'_>, mut index: usize) -> usize {
+fn scan_top_level_item_end(lexed: &crate::lexer::LexedSource<'_>, mut index: usize) -> usize {
     let mut brace_depth = 0usize;
-    while index < cst.tokens.len() {
-        if cst.tokens[index].kind == TokenKind::Symbol {
-            match token_text(cst, index) {
+    while index < lexed.tokens.len() {
+        if lexed.tokens[index].kind == TokenKind::Symbol {
+            match token_text(lexed, index) {
                 ";" if brace_depth == 0 => return index + 1,
                 "{" => brace_depth += 1,
                 "}" => {
@@ -115,10 +117,10 @@ fn scan_top_level_item_end(cst: &crate::cst::Cst<'_>, mut index: usize) -> usize
         }
         index += 1;
     }
-    cst.tokens.len()
+    lexed.tokens.len()
 }
 
-fn token_text<'a>(cst: &'a crate::cst::Cst<'_>, index: usize) -> &'a str {
-    let token = &cst.tokens[index];
-    &cst.source[token.start..token.end]
+fn token_text<'a>(lexed: &'a crate::lexer::LexedSource<'_>, index: usize) -> &'a str {
+    let token = &lexed.tokens[index];
+    &lexed.source[token.start..token.end]
 }

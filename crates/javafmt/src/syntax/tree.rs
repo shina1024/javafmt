@@ -1,5 +1,5 @@
 use crate::comments::CommentAttachment;
-use crate::cst::Cst;
+use crate::lexer::LexedSource;
 
 #[derive(Debug, Clone)]
 pub(crate) struct FileOutline {
@@ -24,7 +24,7 @@ pub(crate) struct TopLevelItem {
 
 #[derive(Debug, Clone)]
 pub(crate) struct ParsedFile<'a> {
-    pub(crate) cst: Cst<'a>,
+    pub(crate) lexed: LexedSource<'a>,
     pub(crate) comments: CommentAttachment,
     pub(crate) outline: FileOutline,
 }

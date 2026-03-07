@@ -133,7 +133,7 @@ fn meaningful_tokens(parsed: &ParsedFile<'_>, start_token: usize, end_token: usi
     (start_token..end_token)
         .filter(|index| {
             !matches!(
-                parsed.cst.tokens[*index].kind,
+                parsed.lexed.tokens[*index].kind,
                 TokenKind::Whitespace | TokenKind::Newline
             )
         })
@@ -149,6 +149,6 @@ fn join_token_texts(parsed: &ParsedFile<'_>, token_indexes: &[usize]) -> String 
 }
 
 fn token_text<'a>(parsed: &'a ParsedFile<'_>, token_index: usize) -> &'a str {
-    let token = &parsed.cst.tokens[token_index];
-    &parsed.cst.source[token.start..token.end]
+    let token = &parsed.lexed.tokens[token_index];
+    &parsed.lexed.source[token.start..token.end]
 }

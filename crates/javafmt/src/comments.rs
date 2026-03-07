@@ -1,4 +1,3 @@
-use crate::cst::Cst;
 use crate::lexer::{LexedSource, TokenKind};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -7,8 +6,7 @@ pub struct CommentAttachment {
     pub block_comment_count: usize,
 }
 
-pub fn attach(cst: &Cst<'_>, lexed: &LexedSource<'_>) -> CommentAttachment {
-    let _ = cst.tokens.len();
+pub fn attach(lexed: &LexedSource<'_>) -> CommentAttachment {
     let mut line_comment_count = 0;
     let mut block_comment_count = 0;
     for token in &lexed.tokens {

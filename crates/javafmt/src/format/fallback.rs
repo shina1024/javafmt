@@ -3,7 +3,7 @@ use crate::syntax::ParsedFile;
 use crate::{emit, ir, printer};
 
 pub(crate) fn format_doc(parsed: &ParsedFile<'_>) -> Doc {
-    let format_ir = ir::build(&parsed.cst, parsed.comments);
+    let format_ir = ir::build(&parsed.lexed, parsed.comments);
     let printed = printer::print(&format_ir);
     let fallback_output = emit::emit(printed);
     text_to_doc(&fallback_output)

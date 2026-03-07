@@ -1,6 +1,5 @@
 use crate::comments::CommentAttachment;
-use crate::cst::Cst;
-use crate::lexer::Token;
+use crate::lexer::{LexedSource, Token};
 
 #[derive(Debug, Clone)]
 pub struct FormatIr<'a> {
@@ -10,10 +9,10 @@ pub struct FormatIr<'a> {
     pub block_comment_count: usize,
 }
 
-pub fn build<'a>(cst: &Cst<'a>, comments: CommentAttachment) -> FormatIr<'a> {
+pub fn build<'a>(lexed: &LexedSource<'a>, comments: CommentAttachment) -> FormatIr<'a> {
     FormatIr {
-        source: cst.source,
-        tokens: cst.tokens.clone(),
+        source: lexed.source,
+        tokens: lexed.tokens.clone(),
         line_comment_count: comments.line_comment_count,
         block_comment_count: comments.block_comment_count,
     }
