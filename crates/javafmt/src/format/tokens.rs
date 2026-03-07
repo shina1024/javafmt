@@ -857,10 +857,12 @@ fn format_tokens(ir: &PrintInput<'_>) -> String {
                             None
                         };
                         let line_based_break_after_open_paren = wrappable_invocation_open_paren
+                            && line_starts_with_current_dotted_call(
+                                out.as_str(),
+                                prev_text.as_deref(),
+                            )
                             && current_output_line(out.as_str()).is_some_and(|line| {
-                                line.trim_start().starts_with('.')
-                                    && line.chars().count() >= 40
-                                    && next_text != Some(")")
+                                line.chars().count() >= 40 && next_text != Some(")")
                             });
                         let should_break_after_open_paren = if explicit_type_argument_call {
                             call_argument_metrics
@@ -969,16 +971,35 @@ fn format_tokens(ir: &PrintInput<'_>) -> String {
                             && chain_continuation_active
                             && paren_depth == chain_continuation_paren_depth
                             && bracket_depth == chain_continuation_bracket_depth;
+                        let next_dotted_call_metrics = (symbol == "."
+                            && prev_text.as_deref() == Some(")")
+                            && bracket_depth == 0)
+                            .then(|| {
+                                next_dotted_member_call_metrics(
+                                    tokens.as_slice(),
+                                    i + consumed,
+                                    ir.source,
+                                )
+                            })
+                            .flatten();
+                        let next_call_forces_break =
+                            next_dotted_call_metrics.is_some_and(|metrics| {
+                                metrics.should_break_short()
+                                    || metrics.should_break_long()
+                                    || metrics.should_force_vertical()
+                                    || metrics.has_comment()
+                            });
+                        let next_call_requires_chain_break =
+                            next_dotted_call_metrics.is_some_and(|metrics| {
+                                metrics.should_force_vertical() || metrics.has_comment()
+                            });
                         let dotted_member_break = symbol == "."
                             && prev_text.as_deref() == Some(")")
                             && bracket_depth == 0
                             && (((lambda_continuation_active || chain_continuation_active)
-                                && should_break_before_chained_dot(out.as_str()))
-                                || next_dotted_member_call_breaks(
-                                    tokens.as_slice(),
-                                    i + consumed,
-                                    ir.source,
-                                ));
+                                && (should_break_before_chained_dot(out.as_str())
+                                    || next_call_forces_break))
+                                || next_call_requires_chain_break);
                         if top_level_chain_dot {
                             if chain_continuation_dot_count >= chain_keep_leading_dots {
                                 out.push('\n');

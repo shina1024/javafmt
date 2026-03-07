@@ -427,6 +427,7 @@ pub(super) fn call_arguments_break_metrics(
     })
 }
 
+#[derive(Debug, Clone, Copy)]
 pub(super) struct CallArgumentMetrics {
     scanned_chars: usize,
     top_level_comma_count: usize,
@@ -452,7 +453,7 @@ impl CallArgumentMetrics {
     pub(super) fn should_force_vertical(&self) -> bool {
         self.has_top_level_initializer
             || (self.saw_top_level_newline && self.max_input_line_args > 2)
-            || self.first_arg_has_call
+            || (self.first_arg_has_call && self.top_level_comma_count >= 1)
             || self.top_level_call_arg_count >= 2
     }
 
@@ -1150,6 +1151,20 @@ pub(super) fn should_break_before_chained_dot(out: &str) -> bool {
     line.chars().filter(|ch| *ch == '.').count() >= 2
 }
 
+pub(super) fn line_starts_with_current_dotted_call(out: &str, call_name: Option<&str>) -> bool {
+    let Some(call_name) = call_name else {
+        return false;
+    };
+    let Some(line) = current_output_line(out) else {
+        return false;
+    };
+    let Some(rest) = line.trim_start().strip_prefix('.') else {
+        return false;
+    };
+    rest.strip_prefix(call_name)
+        .is_some_and(|suffix| suffix.starts_with('('))
+}
+
 pub(super) fn should_break_array_index_expression(
     tokens: &[&Token],
     mut index: usize,
@@ -1208,11 +1223,11 @@ pub(super) fn should_break_array_index_expression(
     scanned_chars >= 40 || (scanned_chars >= 24 && (saw_method_call || saw_binary_operator))
 }
 
-pub(super) fn next_dotted_member_call_breaks(
+pub(super) fn next_dotted_member_call_metrics(
     tokens: &[&Token],
     mut index: usize,
     source: &str,
-) -> bool {
+) -> Option<CallArgumentMetrics> {
     while index < tokens.len() {
         let token = tokens[index];
         match token.kind {
@@ -1223,7 +1238,7 @@ pub(super) fn next_dotted_member_call_breaks(
             TokenKind::Symbol => {
                 let (symbol, consumed) = read_symbol(tokens, index, source);
                 if symbol != "<" {
-                    return false;
+                    return None;
                 }
                 index += consumed;
             }
@@ -1239,19 +1254,12 @@ pub(super) fn next_dotted_member_call_breaks(
         }
         let (symbol, consumed) = read_symbol(tokens, index, source);
         if symbol != "(" {
-            return false;
+            return None;
         }
-        return call_arguments_break_metrics(tokens, index + consumed, source).is_some_and(
-            |metrics| {
-                metrics.should_break_short()
-                    || metrics.should_break_long()
-                    || metrics.should_force_vertical()
-                    || metrics.has_comment()
-            },
-        );
+        return call_arguments_break_metrics(tokens, index + consumed, source);
     }
 
-    false
+    None
 }
 
 fn next_chain_member_call_name<'a>(
