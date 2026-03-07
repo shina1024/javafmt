@@ -292,7 +292,7 @@ fn preserves_blank_lines_between_fields_from_source() {
     assert!(formatted.starts_with("class A {\n\n  int a = 1;"));
     assert!(formatted.contains("int b = 1;\n\n  int c = 1;"));
     assert!(formatted.contains("int d = 1;\n\n  int e = 1;"));
-    assert!(formatted.contains("int e = 1;\n\n}\n"));
+    assert!(formatted.ends_with("  int e = 1;\n}\n"));
 }
 
 #[test]

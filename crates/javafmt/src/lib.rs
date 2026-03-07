@@ -209,6 +209,29 @@ mod tests {
     }
 
     #[test]
+    fn matches_upstream_sealed_modifier_order_case() {
+        let input = include_str!("../../../fixtures/upstream-gjf/1.34.1/testdata/Sealed.input");
+        let expected = include_str!("../../../fixtures/upstream-gjf/1.34.1/testdata/Sealed.output");
+        assert_eq!(format_str(input).output, expected);
+    }
+
+    #[test]
+    fn matches_upstream_multivariable_declaration_case() {
+        let input =
+            include_str!("../../../fixtures/upstream-gjf/1.34.1/testdata/Multivariables.input");
+        let expected =
+            include_str!("../../../fixtures/upstream-gjf/1.34.1/testdata/Multivariables.output");
+        assert_eq!(format_str(input).output, expected);
+    }
+
+    #[test]
+    fn matches_upstream_field_javadoc_spacing_case() {
+        let input = include_str!("../../../fixtures/upstream-gjf/1.34.1/testdata/Fields.input");
+        let expected = include_str!("../../../fixtures/upstream-gjf/1.34.1/testdata/Fields.output");
+        assert_eq!(format_str(input).output, expected);
+    }
+
+    #[test]
     fn internal_pipeline_matches_public_api() {
         let input = "class A{int f(){return 1;}}\n";
         let normalized = compat::normalize_input(input);

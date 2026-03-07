@@ -4,11 +4,13 @@ use crate::lexer::{Token, TokenKind};
 use crate::syntax::ParsedFile;
 
 mod analysis;
+mod declarations;
 mod output;
 #[cfg(test)]
 mod tests;
 
 use analysis::*;
+use declarations::*;
 use output::*;
 
 #[derive(Debug, Clone, Copy)]
@@ -1354,7 +1356,7 @@ fn format_tokens(ir: &PrintInput<'_>) -> String {
 }
 
 fn finalize_text(text: String) -> String {
-    trim_trailing_whitespace(&text)
+    finalize_declarations(&trim_trailing_whitespace(&text))
 }
 
 fn text_to_doc(text: &str) -> Doc {
