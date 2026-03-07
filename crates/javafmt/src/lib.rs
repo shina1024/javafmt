@@ -191,6 +191,24 @@ mod tests {
     }
 
     #[test]
+    fn matches_upstream_javadoc_paragraph_reflow_case() {
+        let input =
+            include_str!("../../../fixtures/upstream-gjf/1.34.1/testjavadoc/B28750242.input");
+        let expected =
+            include_str!("../../../fixtures/upstream-gjf/1.34.1/testjavadoc/B28750242.output");
+        assert_eq!(format_str(input).output, expected);
+    }
+
+    #[test]
+    fn matches_upstream_javadoc_list_spacing_case() {
+        let input =
+            include_str!("../../../fixtures/upstream-gjf/1.34.1/testjavadoc/B31404367.input");
+        let expected =
+            include_str!("../../../fixtures/upstream-gjf/1.34.1/testjavadoc/B31404367.output");
+        assert_eq!(format_str(input).output, expected);
+    }
+
+    #[test]
     fn internal_pipeline_matches_public_api() {
         let input = "class A{int f(){return 1;}}\n";
         let normalized = compat::normalize_input(input);

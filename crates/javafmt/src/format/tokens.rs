@@ -174,6 +174,7 @@ fn format_tokens(ir: &PrintInput<'_>) -> String {
             }
             TokenKind::BlockComment => {
                 annotation_inline_run_active = false;
+                let is_javadoc_comment = token_text(ir.source, token).starts_with("/**");
                 let started_line_start = at_line_start;
                 let attach_after_statement = i > 0
                     && at_line_start
@@ -183,7 +184,8 @@ fn format_tokens(ir: &PrintInput<'_>) -> String {
                 let leading_block_comment = i > 0
                     && at_line_start
                     && out.ends_with('\n')
-                    && token_text(ir.source, tokens[i - 1]) == "{";
+                    && token_text(ir.source, tokens[i - 1]) == "{"
+                    && !is_javadoc_comment;
                 if attach_after_statement {
                     out.pop();
                     at_line_start = false;
@@ -191,13 +193,14 @@ fn format_tokens(ir: &PrintInput<'_>) -> String {
                 if prev_text.as_deref() != Some("(") {
                     ensure_space(&mut out, at_line_start);
                 }
-                let text = normalize_block_comment_text(token_text(ir.source, token));
                 let current_indent = active_indent(indent, &block_stack);
                 let comment_indent = if leading_block_comment {
                     current_indent + 1
                 } else {
                     current_indent
                 };
+                let text =
+                    normalize_block_comment_text(token_text(ir.source, token), comment_indent);
                 write_with_indent(&mut out, &mut at_line_start, comment_indent, &text);
                 if text.ends_with('\n') {
                     at_line_start = true;
