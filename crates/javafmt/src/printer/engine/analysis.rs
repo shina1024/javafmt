@@ -103,7 +103,7 @@ pub(super) fn is_label_colon_context(
     next_text.is_some()
 }
 
-pub(super) fn collect_meaningful_tokens<'a>(ir: &'a FormatIr<'a>) -> Vec<&'a Token> {
+pub(super) fn collect_meaningful_tokens<'a>(ir: &'a PrintInput<'a>) -> Vec<&'a Token> {
     ir.tokens
         .iter()
         .filter(|token| !matches!(token.kind, TokenKind::Whitespace | TokenKind::Newline))

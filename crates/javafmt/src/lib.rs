@@ -4,7 +4,6 @@ mod syntax;
 
 pub mod bench_support;
 pub mod comments;
-pub mod ir;
 pub mod lexer;
 pub mod printer;
 

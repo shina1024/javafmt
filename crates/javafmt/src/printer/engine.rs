@@ -1,4 +1,4 @@
-use crate::ir::FormatIr;
+use crate::lexer::LexedSource;
 use crate::lexer::{Token, TokenKind};
 
 mod analysis;
@@ -10,6 +10,12 @@ use output::*;
 #[derive(Debug, Clone)]
 pub struct PrintedDoc {
     pub text: String,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct PrintInput<'a> {
+    source: &'a str,
+    tokens: &'a [Token],
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,13 +52,17 @@ enum ModuleDirective {
     Provides,
 }
 
-pub fn print(ir: &FormatIr<'_>) -> PrintedDoc {
+pub fn print(lexed: &LexedSource<'_>) -> PrintedDoc {
+    let input = PrintInput {
+        source: lexed.source,
+        tokens: &lexed.tokens,
+    };
     PrintedDoc {
-        text: format_tokens(ir),
+        text: format_tokens(&input),
     }
 }
 
-fn format_tokens(ir: &FormatIr<'_>) -> String {
+fn format_tokens(ir: &PrintInput<'_>) -> String {
     let tokens = collect_meaningful_tokens(ir);
     let mut out = String::with_capacity(ir.source.len() + 16);
     let mut i = 0usize;

@@ -1,13 +1,9 @@
 use super::{PrintedDoc, print};
-use crate::comments;
-use crate::ir;
 use crate::lexer;
 
 fn print_source(source: &str) -> PrintedDoc {
     let lexed = lexer::lex(source);
-    let attachments = comments::attach(&lexed);
-    let ir = ir::build(&lexed, attachments);
-    print(&ir)
+    print(&lexed)
 }
 
 #[test]
