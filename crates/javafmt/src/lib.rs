@@ -135,6 +135,13 @@ mod tests {
     }
 
     #[test]
+    fn formats_package_import_only_file_through_structured_path() {
+        let input = "package p ;\nimport b.B ;\nimport a.A ;\n";
+        let expected = "package p;\n\nimport a.A;\nimport b.B;\n";
+        assert_eq!(format_str(input).output, expected);
+    }
+
+    #[test]
     fn matches_upstream_optional_chain_wrapping_case() {
         let input = include_str!("../../../fixtures/upstream-gjf/1.34.1/testdata/B124394008.input");
         let expected =

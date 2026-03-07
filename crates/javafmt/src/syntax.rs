@@ -1,7 +1,7 @@
 mod legacy;
 mod tree;
 
-pub(crate) use tree::ParsedFile;
+pub(crate) use tree::{ParsedFile, TopLevelItemKind};
 
 pub(crate) fn parse(source: &str) -> ParsedFile<'_> {
     legacy::parse(source)
@@ -9,7 +9,7 @@ pub(crate) fn parse(source: &str) -> ParsedFile<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse, tree::TopLevelItemKind};
+    use super::{TopLevelItemKind, parse};
 
     #[test]
     fn outlines_package_import_and_type_items() {
