@@ -3,9 +3,9 @@ mod format;
 mod syntax;
 
 pub mod bench_support;
-pub mod comments;
-pub mod lexer;
-pub mod printer;
+mod comments;
+mod lexer;
+mod printer;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FormatResult {
@@ -25,6 +25,13 @@ pub fn format_str(input: &str) -> FormatResult {
 #[cfg(test)]
 mod tests {
     use super::{compat, format, format_str, syntax};
+    use crate::lexer::{TokenKind, lex};
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct SignificantToken {
+        kind: TokenKind,
+        text: String,
+    }
 
     #[test]
     fn keeps_formatted_text_unchanged() {
@@ -175,5 +182,41 @@ mod tests {
         let parsed = syntax::parse(&normalized.source);
         let output = compat::finalize_output(format::format(&parsed), normalized.line_ending);
         assert_eq!(output, format_str(input).output);
+    }
+
+    #[test]
+    fn formatting_preserves_non_whitespace_tokens_for_representative_inputs() {
+        let cases = [
+            "class A{}",
+            "class A{/*keep*/int x=1+2;}",
+            "class A{void f(){if(a){b();}else{c();}}}",
+            "class A{String s=\"//not-comment\";char c='x';}",
+            "class A{String s=\"\"\"\nline1\nline2\n\"\"\";}",
+            "@Anno(value={\"a\",\"b\"}) class A{}",
+            "class A{void f(){Runnable r=()->{work();};}}",
+            "class A{void f(){var x=Foo.<Bar>baz(1,2);}}",
+        ];
+
+        for input in cases {
+            let formatted = format_str(input).output;
+            assert_eq!(
+                significant_tokens(input),
+                significant_tokens(&formatted),
+                "non-whitespace tokens changed for input:\n{input}\nformatted as:\n{formatted}"
+            );
+        }
+    }
+
+    fn significant_tokens(source: &str) -> Vec<SignificantToken> {
+        let lexed = lex(source);
+        lexed
+            .tokens
+            .iter()
+            .filter(|token| !matches!(token.kind, TokenKind::Whitespace | TokenKind::Newline))
+            .map(|token| SignificantToken {
+                kind: token.kind,
+                text: source[token.start..token.end].to_owned(),
+            })
+            .collect::<Vec<_>>()
     }
 }
