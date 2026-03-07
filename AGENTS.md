@@ -17,7 +17,8 @@ Build a fast Java formatter (`javafmt`) that is byte-compatible with `google-jav
 
 ## Current Rewrite Direction (2026-03-07)
 
-- The current token-heuristic formatter is now treated as transitional infrastructure.
+- The old parser / IR / printer wrapper path has been removed.
+- The current formatter implementation lives under `syntax` + `format`; the remaining token-heuristic engine is transitional infrastructure inside `format`.
 - The approved direction is a compatibility-first rewrite around `syntax` and `format` layers:
   - lossless syntax tree with token/trivia spans
   - doc/layout-based formatter

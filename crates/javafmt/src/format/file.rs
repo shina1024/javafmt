@@ -1,5 +1,5 @@
 use super::doc::Doc;
-use super::fallback;
+use super::tokens;
 use crate::lexer::TokenKind;
 use crate::syntax::{ParsedFile, TopLevelItemKind};
 
@@ -11,10 +11,7 @@ pub(crate) fn format_file(parsed: &ParsedFile<'_>) -> Doc {
     // Keep soft-line primitives compiled into the production path until the
     // structured formatter starts emitting width-sensitive groups.
     let _softline_scaffold = Doc::soft_line();
-    Doc::group(Doc::concat([
-        Doc::indent(0, fallback::format_doc(parsed)),
-        Doc::Nil,
-    ]))
+    Doc::group(Doc::indent(0, tokens::format_doc(parsed)))
 }
 
 fn format_package_import_file(parsed: &ParsedFile<'_>) -> Option<Doc> {

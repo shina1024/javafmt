@@ -1,16 +1,15 @@
+use super::doc::Doc;
 use crate::lexer::LexedSource;
 use crate::lexer::{Token, TokenKind};
+use crate::syntax::ParsedFile;
 
 mod analysis;
 mod output;
+#[cfg(test)]
+mod tests;
 
 use analysis::*;
 use output::*;
-
-#[derive(Debug, Clone)]
-pub struct PrintedDoc {
-    pub text: String,
-}
 
 #[derive(Debug, Clone, Copy)]
 struct PrintInput<'a> {
@@ -52,14 +51,16 @@ enum ModuleDirective {
     Provides,
 }
 
-pub fn print(lexed: &LexedSource<'_>) -> PrintedDoc {
+pub(super) fn format_doc(parsed: &ParsedFile<'_>) -> Doc {
+    text_to_doc(&format_lexed(&parsed.lexed))
+}
+
+pub(super) fn format_lexed(lexed: &LexedSource<'_>) -> String {
     let input = PrintInput {
         source: lexed.source,
         tokens: &lexed.tokens,
     };
-    PrintedDoc {
-        text: format_tokens(&input),
-    }
+    finalize_text(format_tokens(&input))
 }
 
 fn format_tokens(ir: &PrintInput<'_>) -> String {
@@ -1326,4 +1327,43 @@ fn format_tokens(ir: &PrintInput<'_>) -> String {
         normalized.push('\n');
     }
     normalized
+}
+
+fn finalize_text(text: String) -> String {
+    trim_trailing_whitespace(&text)
+}
+
+fn text_to_doc(text: &str) -> Doc {
+    if text.is_empty() {
+        return Doc::Nil;
+    }
+
+    let mut docs = Vec::new();
+    for segment in text.split_inclusive('\n') {
+        let line = segment.strip_suffix('\n').unwrap_or(segment);
+        if !line.is_empty() {
+            docs.push(Doc::text(line));
+        }
+        if segment.ends_with('\n') {
+            docs.push(Doc::hard_line());
+        }
+    }
+
+    Doc::concat(docs)
+}
+
+fn trim_trailing_whitespace(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for segment in input.split_inclusive('\n') {
+        let (line, has_newline) = if let Some(stripped) = segment.strip_suffix('\n') {
+            (stripped, true)
+        } else {
+            (segment, false)
+        };
+        out.push_str(line.trim_end_matches([' ', '\t']));
+        if has_newline {
+            out.push('\n');
+        }
+    }
+    out
 }

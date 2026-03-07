@@ -5,7 +5,6 @@ mod syntax;
 pub mod bench_support;
 mod comments;
 mod lexer;
-mod printer;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FormatResult {

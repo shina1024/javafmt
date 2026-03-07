@@ -63,16 +63,17 @@ Formatter pipeline:
 
 ### 4.1 Rewrite Execution Model
 
-- **Current transitional state:** legacy token-heuristic formatting remains in-tree only to keep
-  local gates green while the rewrite lands incrementally.
+- **Current state:** the formatter now runs through `syntax` and `format` only. The former
+  parser/IR/printer fallback path has been removed, and the remaining token-heuristic engine lives
+  under `format` as an implementation detail.
 - **Target default path:** lossless syntax tree -> doc builder -> layout solver.
-- **Migration rule:** new subsystem formatters replace legacy behavior one syntax family at a time
-  (`expression` -> `declaration header` -> `statement/block` -> `comment/javadoc`).
-- **Non-rule:** preserving the legacy formatter's exact internal behavior is not required during
-  migration; rewrite each subsystem in the way that most directly improves full-suite
-  compatibility.
-- **Exit condition:** remove the legacy formatter once the rewritten path owns the default
-  end-to-end pipeline and is measured against the upstream full suite.
+- **Migration rule:** new subsystem formatters replace the remaining token-heuristic implementation
+  one syntax family at a time (`expression` -> `declaration header` -> `statement/block` ->
+  `comment/javadoc`).
+- **Non-rule:** preserving the previous formatter's internal structure is not required; replace
+  subsystems in the way that most directly improves full-suite compatibility.
+- **Exit condition:** the token-heuristic engine is retired once the structured formatter owns the
+  default end-to-end pipeline and is measured against the upstream full suite.
 
 ## 5. Design Principles for Speed
 
@@ -386,7 +387,7 @@ Implemented compatibility coverage in recent cycles:
 Rewrite work now approved:
 
 - breaking internal file/module layout changes are allowed
-- legacy parser / IR / printer layers may be replaced rather than incrementally preserved
+- the former parser / IR / printer wrapper layers have already been removed
 - upstream full-suite pass rate is the primary architectural driver
 
 Known caveats / guardrails:
