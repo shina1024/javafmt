@@ -1,7 +1,7 @@
 mod doc;
+mod fallback;
 mod file;
 mod layout;
-mod legacy;
 
 use crate::syntax::ParsedFile;
 

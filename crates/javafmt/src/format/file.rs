@@ -1,5 +1,5 @@
 use super::doc::Doc;
-use super::legacy;
+use super::fallback;
 use crate::lexer::TokenKind;
 use crate::syntax::{ParsedFile, TopLevelItemKind};
 
@@ -11,9 +11,10 @@ pub(crate) fn format_file(parsed: &ParsedFile<'_>) -> Doc {
     // Keep soft-line primitives compiled into the production path until the
     // structured formatter starts emitting width-sensitive groups.
     let _softline_scaffold = Doc::soft_line();
-    let legacy_output = legacy::format(parsed);
-    let line_doc = text_to_doc(&legacy_output);
-    Doc::group(Doc::concat([Doc::indent(0, line_doc), Doc::Nil]))
+    Doc::group(Doc::concat([
+        Doc::indent(0, fallback::format_doc(parsed)),
+        Doc::Nil,
+    ]))
 }
 
 fn format_package_import_file(parsed: &ParsedFile<'_>) -> Option<Doc> {
@@ -150,23 +151,4 @@ fn join_token_texts(parsed: &ParsedFile<'_>, token_indexes: &[usize]) -> String 
 fn token_text<'a>(parsed: &'a ParsedFile<'_>, token_index: usize) -> &'a str {
     let token = &parsed.cst.tokens[token_index];
     &parsed.cst.source[token.start..token.end]
-}
-
-fn text_to_doc(text: &str) -> Doc {
-    if text.is_empty() {
-        return Doc::Nil;
-    }
-
-    let mut docs = Vec::new();
-    for segment in text.split_inclusive('\n') {
-        let line = segment.strip_suffix('\n').unwrap_or(segment);
-        if !line.is_empty() {
-            docs.push(Doc::text(line));
-        }
-        if segment.ends_with('\n') {
-            docs.push(Doc::hard_line());
-        }
-    }
-
-    Doc::concat(docs)
 }

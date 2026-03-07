@@ -2,7 +2,7 @@ use super::tree::{FileOutline, ParsedFile, TopLevelItem, TopLevelItemKind};
 use crate::lexer::TokenKind;
 use crate::{comments, lexer, parser};
 
-pub(crate) fn parse(source: &str) -> ParsedFile<'_> {
+pub(crate) fn parse_file(source: &str) -> ParsedFile<'_> {
     let lexed = lexer::lex(source);
     let cst = parser::parse(&lexed);
     let comments = comments::attach(&cst, &lexed);

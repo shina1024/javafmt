@@ -1,10 +1,10 @@
-mod legacy;
+mod parse;
 mod tree;
 
 pub(crate) use tree::{ParsedFile, TopLevelItemKind};
 
 pub(crate) fn parse(source: &str) -> ParsedFile<'_> {
-    legacy::parse(source)
+    parse::parse_file(source)
 }
 
 #[cfg(test)]
